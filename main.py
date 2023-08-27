@@ -1,9 +1,9 @@
+import json
 from os import getenv
 
+import altair as alt
 import openai
 import pandas as pd
-import requests
-import tiktoken
 from openai.embeddings_utils import cosine_similarity
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
@@ -93,24 +93,20 @@ def get_top_tables(index: DataFrame, query: str, n: int = 5) -> DataFrame:
     ).iloc[:n]
 
 
-def get_sql_query(query: str, summary: str) -> str:
-    return openai.ChatCompletion.create(
+def get_error_prompt(messages) -> str:
+    if messages:
+        return "Previous attempts:\n" + "\n".join(messages)
+    return ""
+
+
+def generate_completion(system_prompt):
+    response = openai.ChatCompletion.create(
         model=SQL_GENERATION_MODEL,
         messages=[
-            SYSTEM_PROMPT_MESSAGE,
-            {
-                "role": "system",
-                "content": f"""
-                    1. Write a valid SQL query that answers the question/command: {query}.
-                    2. Use the following tables: {summary}.
-                    3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
-                    4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
-                    5. If the question/command can't be accurately answered by querying the database, return nothing at all.
-                    6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
-                """
-            }
+            {"role": "system", "content": system_prompt}
         ]
     ).choices[0].message.content
+    return response
 
 
 def build_columns_index(table_columns):
@@ -146,23 +142,69 @@ def build_index(df, embed_col):
     return df
 
 
-def generate_sql(index, question) -> str:
-    top_tables = get_top_tables(index, question)
-    summary = SUMMARY_DELIMITER.join(top_tables['summary'])
-    answer = get_sql_query(question, summary)
-    return answer.removeprefix('```sql').removeprefix('```SQL').removesuffix('```')
-
-
 def generate_valid_sql(conn, index, question) -> str:
+    errors = []
+    n = 1
     while True:
-        statement = generate_sql(index, question)
+        statement = generate_sql(index, question, errors)
         try:
             conn.cursor().describe(statement)
-        except Exception:
+        except Exception as e:
+            errors.append(f"Query {n}/3: {statement}. Error: {e}")
             print(f"BAD: {statement}")
+            n += 1
+            if n > 3:
+                raise
         else:
             print(f"GOOD: {statement}")
             return statement
+
+
+def generate_sql(index, question, errors) -> str:
+    top_tables = get_top_tables(index, question)
+    summary = SUMMARY_DELIMITER.join(top_tables['summary'])
+    answer = get_sql_query(question, summary, errors)
+    return postprocess_generated_sql(answer)
+
+
+def get_sql_query(query: str, summary: str, errors) -> str:
+    system_prompt = f"""
+        1. Write a valid SQL query that answers the question/command: {query}.
+        2. Use the following tables: {summary}.
+        3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
+        4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
+        5. If the question/command can't be accurately answered by querying the database, return nothing at all.
+        6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
+        {get_error_prompt(errors)}
+    """
+    response = generate_completion(system_prompt)
+    return response
+
+
+def postprocess_generated_sql(answer):
+    return answer.removeprefix('```sql').removeprefix('```SQL').removesuffix('```')
+
+
+def display_data(df, question):
+    prompt = f"""
+        Create a Vega-Lite chart definition that helpers answer the user's question/command using 
+        the available data.
+        Do not include the data.values property, it will be populated later, using a JSON
+        representation of the data with precisely matching column names.
+        A preview of the available data is:
+        {df.sample(n=5).to_markdown()}.
+        There are {len(df)} rows in the dataset. 
+        Choose a visualization that conveys an appropriate quantity of information.
+        The user's question is: {question}.
+        Generate the chart definition, excluding ***any*** other text, it should precisely follow 
+        the syntax defined at https://vega.github.io/schema/vega-lite/v5.json.
+    """
+    completion = generate_completion(prompt)
+    raw_definition = completion
+    definition = json.loads(raw_definition)
+    definition['data'] = {'values': df.to_dict(orient='records')}
+    chart = alt.Chart(**definition)
+    chart.interactive()
 
 
 def e2e_qa(conn, index, question):
@@ -170,6 +212,7 @@ def e2e_qa(conn, index, question):
     print(statement)
     answer = conn.cursor().execute(statement).fetch_pandas_all()
     print(answer.to_markdown())
+    display_data(answer, question)
 
 
 # Examples?
