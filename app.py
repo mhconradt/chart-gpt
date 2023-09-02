@@ -4,7 +4,6 @@ import streamlit as st
 
 from chart_gpt import chat_summarize_data
 from chart_gpt import create_index
-from chart_gpt import display_data
 from chart_gpt import generate_valid_sql
 from chart_gpt import get_connection
 
@@ -33,21 +32,24 @@ query = generate_valid_sql(conn, index, question)
 st.text(query)
 
 # Data
-
-df = conn.cursor().execute(query).fetch_pandas_all()
+cursor = conn.cursor()
+cursor.execute("alter session set query_tag = %(question)s;", {'question': question})
+df = cursor.execute(query).fetch_pandas_all()
 
 st.write(df)
 
-try:
-    viz = display_data(df, conn)
+if len(df):
+    try:
+        # viz = display_data(df, conn)
+        #
+        # st.altair_chart(viz)
+        print('Skipping chart generation for query: ', question)
+    except Exception as e:
+        traceback.print_exc()
 
-    st.altair_chart(viz)
-except Exception as e:
-    traceback.print_exc()
-
-try:
-    st.text(chat_summarize_data(df, question))
-except Exception:
-    traceback.print_exc()
+    try:
+        st.text(chat_summarize_data(df, question))
+    except Exception:
+        traceback.print_exc()
 
 # Chart

@@ -1,5 +1,6 @@
 import json
 from os import getenv
+from typing import Container
 from typing import Literal
 
 import altair as alt
@@ -72,17 +73,17 @@ class DataBoss:
         df = df[[c for c in df.columns if df[c].notna().any()]]
         return df
 
-    def get_table_descriptions(self, limit: int = DEFAULT_TABLE_LIMIT) -> dict[str, DataFrame]:
-        return {table: self.describe_table(table) for table in self.show_tables(limit=limit)}
+    def get_table_descriptions(self, n: int = DEFAULT_TABLE_LIMIT) -> dict[str, DataFrame]:
+        return {table: self.describe_table(table) for table in self.show_tables(limit=n)}
 
     def get_table_samples(
             self,
-            row_limit: int = DEFAULT_SAMPLE_LIMIT,
-            table_limit: int = DEFAULT_TABLE_LIMIT
+            n_rows: int = DEFAULT_SAMPLE_LIMIT,
+            n_tables: int = DEFAULT_TABLE_LIMIT
     ) -> dict[str, DataFrame]:
         return {
-            table: self.sample_table(table, limit=row_limit)
-            for table in self.show_tables(limit=table_limit)
+            table: self.sample_table(table, limit=n_rows)
+            for table in self.show_tables(limit=n_tables)
         }
 
 
@@ -179,6 +180,7 @@ def get_sql_query(query: str, summary: str, errors) -> str:
         6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
         {get_error_prompt(errors)}
     """
+    print(system_prompt)
     response = generate_completion(system_prompt)
     return response
 
@@ -223,11 +225,12 @@ def e2e_qa(conn, index, question):
 def chat_summarize_data(df, question):
     return generate_completion(f"""
         Try to answer the user's question: {question} from this dataset {df.to_markdown()}.
+        The dataset begins with a header containing the column names.
         The most important thing to consider is that your message will be presented directly to the
         user, so if there's nothing relevant to say, just say something like "here is the data"
         instead of complaining.
         Provide your explanation:
-    """)
+    """, model='gpt-3.5-turbo')
 
 
 # Examples?
@@ -236,7 +239,7 @@ def chat_summarize_data(df, question):
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
 def create_index(conn):
     db = DataBoss(conn)
-    table_samples = db.get_table_samples(table_limit=100)
+    table_samples = db.get_table_samples(n_tables=100)
     # Build an index of tables from embeddings of the table name and columns
     # index = build_columns_index(table_samples)
     index = build_sample_index(table_samples)
@@ -252,6 +255,14 @@ class IndexData(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+    def subset(self, tables: Container[str]) -> "IndexData":
+        return IndexData(
+            descriptions={table: description for table, description in self.descriptions.items()
+                          if table in tables},
+            samples={table: sample for table, sample in self.samples.items()
+                     if table in tables},
+        )
+
 
 class Index(BaseModel):
     data: IndexData
@@ -260,19 +271,46 @@ class Index(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+    def subset(self, tables: Container[str]) -> "Index":
+        return Index(
+            data=self.data.subset(tables),
+            embeddings=self.embeddings.loc[tables]
+        )
+
     @classmethod
-    def from_data(cls, data: IndexData) -> "Index":
+    def from_data(
+            cls,
+            data: IndexData,
+            strategy: Literal["sample", "semantic"] = "sample"
+    ) -> "Index":
         # [table, column] -> [text]
-        df = DataFrame([
-            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
-            for table, df in data.samples.items() for column in df.columns
-        ]).set_index(['table', 'column'])
+        if strategy == "sample":
+            df = cls.get_text_sample(data)
+        elif strategy == "semantic":
+            df = cls.get_text_semantic(data)
         response = openai.Embedding.create(input=list(df['text']), engine=EMBEDDING_MODEL)
         embeddings = df.assign(embedding=[item.embedding for item in response.data]) \
             .embedding \
             .apply(lambda s: pd.Series(s)) \
             .rename(lambda i: f'dim_{i}', axis=1)
         return cls(data=data, embeddings=embeddings)
+
+    @classmethod
+    def get_text_semantic(cls, data: IndexData) -> DataFrame:
+        openai.ChatCompletion.create()
+        df = DataFrame([
+            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
+            for table, df in data.samples.items() for column in df.columns
+        ]).set_index(['table', 'column'])
+        return df
+
+    @classmethod
+    def get_text_sample(cls, data: IndexData) -> DataFrame:
+        df = DataFrame([
+            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
+            for table, df in data.samples.items() for column in df.columns
+        ]).set_index(['table', 'column'])
+        return df
 
     def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> DataFrame:
         query_embedding = get_embedding(query, engine=EMBEDDING_MODEL)
