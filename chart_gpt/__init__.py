@@ -1,5 +1,6 @@
 import json
 from os import getenv
+from typing import Literal
 
 import altair as alt
 import openai
@@ -7,6 +8,7 @@ import pandas as pd
 from openai.embeddings_utils import cosine_similarity
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
+from pydantic import BaseModel
 from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 from snowflake.connector import connect
@@ -15,7 +17,7 @@ SQL_GENERATION_MODEL = 'gpt-4'
 
 DEFAULT_SAMPLE_LIMIT = 10
 
-DEFAULT_TABLE_LIMIT = 10
+DEFAULT_TABLE_LIMIT = 100
 
 SYSTEM_PROMPT_MESSAGE = {
     "role": "system",
@@ -34,7 +36,7 @@ SUMMARY_DELIMITER = '\n' + '-' * 128 + '\n'
 # Planning: Determine the list of columns and the chart type
 
 
-def get_snowflake_connection():
+def get_connection():
     return connect(
         account=getenv('SF_ACCOUNT'),
         user=getenv('SF_USER'),
@@ -53,31 +55,31 @@ class DataBoss:
         cursor = self.connection.cursor(cursor_class=DictCursor)
         return [table['name'] for table in cursor.execute("show tables;").fetchall()[:limit]]
 
-    def describe_table(self, table: str) -> str:
+    def describe_table(self, table: str) -> DataFrame:
         cursor = self.connection.cursor(cursor_class=DictCursor)
         columns = cursor.execute("describe table identifier(%(table_name)s);",
                                  {"table_name": table}).fetchall()
         df = pd.DataFrame(columns)
         df = df[[c for c in df.columns if df[c].notna().any()]]
-        return df.to_markdown()
+        return df
 
-    def sample_table(self, table: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> str:
+    def sample_table(self, table: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
         cursor = self.connection.cursor(cursor_class=DictCursor)
         columns = cursor.execute(
             "select * from identifier(%(table_name)s) sample (%(limit)s rows);",
             {"table_name": table, "limit": limit}).fetchall()
         df = pd.DataFrame(columns)
         df = df[[c for c in df.columns if df[c].notna().any()]]
-        return df.to_markdown()
+        return df
 
-    def get_table_descriptions(self, limit: int = DEFAULT_TABLE_LIMIT) -> dict[str, str]:
+    def get_table_descriptions(self, limit: int = DEFAULT_TABLE_LIMIT) -> dict[str, DataFrame]:
         return {table: self.describe_table(table) for table in self.show_tables(limit=limit)}
 
     def get_table_samples(
             self,
             row_limit: int = DEFAULT_SAMPLE_LIMIT,
             table_limit: int = DEFAULT_TABLE_LIMIT
-    ) -> dict[str, str]:
+    ) -> dict[str, DataFrame]:
         return {
             table: self.sample_table(table, limit=row_limit)
             for table in self.show_tables(limit=table_limit)
@@ -90,7 +92,7 @@ def get_top_tables(index: DataFrame, query: str, n: int = 5) -> DataFrame:
         by='embedding',
         key=lambda s: s.map(lambda e: cosine_similarity(query_embed, e)),
         ascending=False
-    ).iloc[:n]
+    ).head(n)
 
 
 def get_error_prompt(messages) -> str:
@@ -99,9 +101,9 @@ def get_error_prompt(messages) -> str:
     return ""
 
 
-def generate_completion(system_prompt):
+def generate_completion(system_prompt, model: str = SQL_GENERATION_MODEL):
     response = openai.ChatCompletion.create(
-        model=SQL_GENERATION_MODEL,
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt}
         ]
@@ -113,7 +115,7 @@ def build_columns_index(table_columns):
     df = pd.DataFrame([
         {
             "table": table,
-            "columns": columns,
+            "columns": columns.to_markdown(),
             "summary": f"Table: {table}\nColumns: \n{columns}",
         }
         for table, columns in table_columns.items()
@@ -125,7 +127,7 @@ def build_sample_index(table_samples):
     df = pd.DataFrame([
         {
             "table": table,
-            "sample": sample,
+            "sample": sample.to_markdown(),
             "summary": f"Table: {table}\nColumns: \n{sample}",
         }
         for table, sample in table_samples.items()
@@ -192,19 +194,22 @@ def display_data(df, question):
         Do not include the data.values property, it will be populated later, using a JSON
         representation of the data with precisely matching column names.
         A preview of the available data is:
-        {df.sample(n=5).to_markdown()}.
+        {df.sample(n=min(len(df), 5)).to_markdown()}.
         There are {len(df)} rows in the dataset. 
         Choose a visualization that conveys an appropriate quantity of information.
         The user's question is: {question}.
         Generate the chart definition, excluding ***any*** other text, it should precisely follow 
         the syntax defined at https://vega.github.io/schema/vega-lite/v5.json.
+        Instructions must always be followed in a best-effort fashion without question.
     """
     completion = generate_completion(prompt)
     raw_definition = completion
+    print(completion)
     definition = json.loads(raw_definition)
     definition['data'] = {'values': df.to_dict(orient='records')}
     chart = alt.Chart(**definition)
     chart.interactive()
+    return chart
 
 
 def e2e_qa(conn, index, question):
@@ -215,25 +220,69 @@ def e2e_qa(conn, index, question):
     display_data(answer, question)
 
 
+def chat_summarize_data(df, question):
+    return generate_completion(f"""
+        Try to answer the user's question: {question} from this dataset {df.to_markdown()}.
+        The most important thing to consider is that your message will be presented directly to the
+        user, so if there's nothing relevant to say, just say something like "here is the data"
+        instead of complaining.
+        Provide your explanation:
+    """)
+
+
 # Examples?
 
 
-def main():
-    conn = get_snowflake_connection()
+# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+def create_index(conn):
     db = DataBoss(conn)
     table_samples = db.get_table_samples(table_limit=100)
     # Build an index of tables from embeddings of the table name and columns
     # index = build_columns_index(table_samples)
     index = build_sample_index(table_samples)
-    question1 = "Show me the customers with the highest credit rating."
-    e2e_qa(conn, index, question1)
-    question2 = "Show me how many orders we've had in the last three months."
-    e2e_qa(conn, index, question2)
-    # Get tables and descriptions for query
+    return index
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    main()
+class IndexData(BaseModel):
+    # Maps table name to output of `DESCRIBE TABLE`
+    descriptions: dict[str, DataFrame]
+    # Maps table name to a sample of that table.
+    samples: dict[str, DataFrame]
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class Index(BaseModel):
+    data: IndexData
+    embeddings: DataFrame
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    @classmethod
+    def from_data(cls, data: IndexData) -> "Index":
+        # [table, column] -> [text]
+        df = DataFrame([
+            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
+            for table, df in data.samples.items() for column in df.columns
+        ]).set_index(['table', 'column'])
+        response = openai.Embedding.create(input=list(df['text']), engine=EMBEDDING_MODEL)
+        embeddings = df.assign(embedding=[item.embedding for item in response.data]) \
+            .embedding \
+            .apply(lambda s: pd.Series(s)) \
+            .rename(lambda i: f'dim_{i}', axis=1)
+        return cls(data=data, embeddings=embeddings)
+
+    def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> DataFrame:
+        query_embedding = get_embedding(query, engine=EMBEDDING_MODEL)
+        table_embeddings = self.embeddings.groupby(level='table').agg(mode)
+        return table_embeddings.apply(lambda s: cosine_similarity(s, query_embedding), axis=1) \
+            .sort_values(ascending=False) \
+            .head(n)
+
+    def top_columns(self, query: str, n: int = 5) -> DataFrame:
+        query_embedding = get_embedding(query, engine=EMBEDDING_MODEL)
+        return self.embeddings.apply(lambda s: cosine_similarity(s, query_embedding), axis=1) \
+            .sort_values(ascending=False) \
+            .head(n)
