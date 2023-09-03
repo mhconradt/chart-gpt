@@ -15,15 +15,17 @@ from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 from snowflake.connector import connect
 
+DEFAULT_CONTEXT_COLUMN_LIMIT = 5
+
 LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_columns", 100,
     "display.width", 1000,
     "display.max_colwidth", 16
 )
 
-DEFAULT_CONTEXT_ROW_LIMIT = 3
+DEFAULT_CONTEXT_ROW_LIMIT = 5
 
-DEFAULT_CONTEXT_TABLE_LIMIT = 3
+DEFAULT_CONTEXT_TABLE_LIMIT = 5
 
 TABLE_SUMMARY_FORMAT = """
 Table: {table}
@@ -229,15 +231,15 @@ class Index(BaseModel):
     def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> DataFrame:
         query_embedding = get_embedding(query, engine=EMBEDDING_MODEL)
         table_embeddings = self.embeddings.groupby(level='table').agg(mode)
-        return table_embeddings.apply(lambda s: cosine_similarity(s, query_embedding), axis=1) \
-            .sort_values(ascending=False) \
-            .head(n)
+        table_scores = table_embeddings.apply(lambda s: cosine_similarity(s, query_embedding),
+                                              axis=1).sort_values(ascending=False).head(n)
+        return table_scores.index.tolist()
 
-    def top_columns(self, query: str, n: int = 5) -> DataFrame:
+    def top_columns(self, query: str, n: int = 5) -> list[str]:
         query_embedding = get_embedding(query, engine=EMBEDDING_MODEL)
-        return self.embeddings.apply(lambda s: cosine_similarity(s, query_embedding), axis=1) \
-            .sort_values(ascending=False) \
-            .head(n)
+        column_scores = self.embeddings.apply(lambda s: cosine_similarity(s, query_embedding),
+                                              axis=1).sort_values(ascending=False).head(n)
+        return [column for table, column in column_scores.index.tolist()]
 
 
 class SQLGenerator:
@@ -287,16 +289,22 @@ class SQLGenerator:
             self,
             question: str,
             n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
-            n_rows: int = DEFAULT_CONTEXT_ROW_LIMIT
+            n_rows: int = DEFAULT_CONTEXT_ROW_LIMIT,
+            n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT
     ) -> str:
         top_tables = self.index.top_tables(question, n=n_tables)
         with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+            table_samples = {}
+            for table in top_tables:
+                table_index = self.index.subset([table])
+                columns = table_index.top_columns(question, n_columns)
+                table_samples[table] = self.index.data.samples[table][columns].head(n_rows)
             summary = SUMMARY_DELIMITER.join([
                 TABLE_SUMMARY_FORMAT.format(
                     table=table,
-                    sample=self.index.data.samples[table].head(n_rows)
+                    sample=sample
                 )
-                for table in top_tables.index
+                for table, sample in table_samples.items()
             ])
         return summary
 
