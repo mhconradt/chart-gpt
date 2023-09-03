@@ -1,4 +1,5 @@
 import json
+import random
 from os import getenv
 from typing import Container
 from typing import Literal
@@ -14,10 +15,24 @@ from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 from snowflake.connector import connect
 
+LLM_PANDAS_DISPLAY_OPTIONS = (
+    "display.max_columns", 100,
+    "display.width", 1000,
+    "display.max_colwidth", 16
+)
+
+DEFAULT_CONTEXT_ROW_LIMIT = 3
+
+DEFAULT_CONTEXT_TABLE_LIMIT = 3
+
+TABLE_SUMMARY_FORMAT = """
+Table: {table}
+Sample: {sample}
+"""
+
 SQL_GENERATION_MODEL = 'gpt-4'
 
 DEFAULT_SAMPLE_LIMIT = 10
-
 DEFAULT_TABLE_LIMIT = 100
 
 SYSTEM_PROMPT_MESSAGE = {
@@ -48,7 +63,7 @@ def get_connection():
     )
 
 
-class DataBoss:
+class DatabaseCrawler:
     def __init__(self, connection: SnowflakeConnection):
         self.connection = connection
 
@@ -86,20 +101,14 @@ class DataBoss:
             for table in self.show_tables(limit=n_tables)
         }
 
+    def get_index_data(self) -> "IndexData":
+        return IndexData(
+            samples=self.get_table_samples(),
+            descriptions=self.get_table_descriptions(),
+        )
 
-def get_top_tables(index: DataFrame, query: str, n: int = 5) -> DataFrame:
-    query_embed = get_embedding(query, engine=EMBEDDING_MODEL)
-    return index.sort_values(
-        by='embedding',
-        key=lambda s: s.map(lambda e: cosine_similarity(query_embed, e)),
-        ascending=False
-    ).head(n)
-
-
-def get_error_prompt(messages) -> str:
-    if messages:
-        return "Previous attempts:\n" + "\n".join(messages)
-    return ""
+    def get_index(self) -> "Index":
+        return Index.from_data(self.get_index_data())
 
 
 def generate_completion(system_prompt, model: str = SQL_GENERATION_MODEL):
@@ -109,79 +118,6 @@ def generate_completion(system_prompt, model: str = SQL_GENERATION_MODEL):
             {"role": "system", "content": system_prompt}
         ]
     ).choices[0].message.content
-    return response
-
-
-def build_columns_index(table_columns):
-    df = pd.DataFrame([
-        {
-            "table": table,
-            "columns": columns.to_markdown(),
-            "summary": f"Table: {table}\nColumns: \n{columns}",
-        }
-        for table, columns in table_columns.items()
-    ])
-    return build_index(df, 'summary')
-
-
-def build_sample_index(table_samples):
-    df = pd.DataFrame([
-        {
-            "table": table,
-            "sample": sample.to_markdown(),
-            "summary": f"Table: {table}\nColumns: \n{sample}",
-        }
-        for table, sample in table_samples.items()
-    ])
-    return build_index(df, 'summary')
-
-
-def build_index(df, embed_col):
-    response = openai.Embedding.create(
-        input=list(df[embed_col]),
-        engine=EMBEDDING_MODEL
-    )
-    df['embedding'] = [item.embedding for item in response.data]
-    return df
-
-
-def generate_valid_sql(conn, index, question) -> str:
-    errors = []
-    n = 1
-    while True:
-        statement = generate_sql(index, question, errors)
-        try:
-            conn.cursor().describe(statement)
-        except Exception as e:
-            errors.append(f"Query {n}/3: {statement}. Error: {e}")
-            print(f"BAD: {statement}")
-            n += 1
-            if n > 3:
-                raise
-        else:
-            print(f"GOOD: {statement}")
-            return statement
-
-
-def generate_sql(index, question, errors) -> str:
-    top_tables = get_top_tables(index, question)
-    summary = SUMMARY_DELIMITER.join(top_tables['summary'])
-    answer = get_sql_query(question, summary, errors)
-    return postprocess_generated_sql(answer)
-
-
-def get_sql_query(query: str, summary: str, errors) -> str:
-    system_prompt = f"""
-        1. Write a valid SQL query that answers the question/command: {query}.
-        2. Use the following tables: {summary}.
-        3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
-        4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
-        5. If the question/command can't be accurately answered by querying the database, return nothing at all.
-        6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
-        {get_error_prompt(errors)}
-    """
-    print(system_prompt)
-    response = generate_completion(system_prompt)
     return response
 
 
@@ -214,36 +150,14 @@ def display_data(df, question):
     return chart
 
 
-def e2e_qa(conn, index, question):
-    statement = generate_valid_sql(conn, index, question)
-    print(statement)
-    answer = conn.cursor().execute(statement).fetch_pandas_all()
-    print(answer.to_markdown())
-    display_data(answer, question)
-
-
-def chat_summarize_data(df, question):
-    return generate_completion(f"""
-        Try to answer the user's question: {question} from this dataset {df.to_markdown()}.
-        The dataset begins with a header containing the column names.
-        The most important thing to consider is that your message will be presented directly to the
-        user, so if there's nothing relevant to say, just say something like "here is the data"
-        instead of complaining.
-        Provide your explanation:
-    """, model='gpt-3.5-turbo')
-
-
-# Examples?
-
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
-def create_index(conn):
-    db = DataBoss(conn)
-    table_samples = db.get_table_samples(n_tables=100)
-    # Build an index of tables from embeddings of the table name and columns
-    # index = build_columns_index(table_samples)
-    index = build_sample_index(table_samples)
-    return index
+def chat_summarize_data(df, question, query):
+    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+        return generate_completion(f"""
+            User's question: {question}.
+            Generated SQL query: {query}
+            SQL query result set: {df}
+            Answer to the user's question:
+        """, model='gpt-3.5-turbo')
 
 
 class IndexData(BaseModel):
@@ -324,3 +238,81 @@ class Index(BaseModel):
         return self.embeddings.apply(lambda s: cosine_similarity(s, query_embedding), axis=1) \
             .sort_values(ascending=False) \
             .head(n)
+
+
+class SQLGenerator:
+    def __init__(self, connection: SnowflakeConnection, index: Index):
+        self.connection = connection
+        self.index = index
+
+    def generate_valid_query(self, question: str) -> str:
+        errors = []
+        n = 1
+        while True:
+            prompt = self.build_prompt(question, errors)
+            print(prompt)
+            statement = self.generate(prompt)
+            try:
+                self.validate(statement)
+            except Exception as e:
+                errors.append(f"Query {n}/3: {statement}. Error: {e}")
+                print(f"BAD: {statement}")
+                n += 1
+                if n > 3:
+                    raise
+            else:
+                print(f"GOOD: {statement}")
+                return statement
+
+    def generate(self, prompt):
+        response = generate_completion(prompt)
+        answer = response
+        statement = postprocess_generated_sql(answer)
+        return statement
+
+    def build_prompt(self, question, errors):
+        summary = self.get_context(question)
+        system_prompt = f"""
+                1. Write a valid SQL query that answers the question/command: {question}.
+                2. Use the following tables: {summary}.
+                3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
+                4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
+                5. If the question/command can't be accurately answered by querying the database, return nothing at all.
+                6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
+                {self.get_error_prompt(errors)}
+            """
+        return system_prompt
+
+    def get_context(
+            self,
+            question: str,
+            n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
+            n_rows: int = DEFAULT_CONTEXT_ROW_LIMIT
+    ) -> str:
+        top_tables = self.index.top_tables(question, n=n_tables)
+        with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+            summary = SUMMARY_DELIMITER.join([
+                TABLE_SUMMARY_FORMAT.format(
+                    table=table,
+                    sample=self.index.data.samples[table].head(n_rows)
+                )
+                for table in top_tables.index
+            ])
+        return summary
+
+    def validate(self, statement: str):
+        self.connection.cursor().describe(statement)
+
+    def get_error_prompt(self, messages) -> str:
+        if messages:
+            return "Previous attempts:\n" + "\n".join(messages)
+        return ""
+
+
+def get_bootstrap_questions() -> list[str]:
+    with open('data/TPCDS_SF10TCL-queries.json', 'r') as f:
+        return json.load(f)
+
+
+def get_random_questions():
+    return random.choices(get_bootstrap_questions(), k=10)

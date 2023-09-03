@@ -2,7 +2,7 @@ import json
 
 from pandas import DataFrame
 
-from chart_gpt import DataBoss
+from chart_gpt import DatabaseCrawler
 from chart_gpt import Index
 from chart_gpt import IndexData
 from chart_gpt import get_connection
@@ -15,7 +15,7 @@ def main():
     query_df = DataFrame(queries, index=queries, columns=['query']).rename_axis('query')
     print(query_df)
     conn = get_connection()
-    boss = DataBoss(conn)
+    boss = DatabaseCrawler(conn)
     n = 24
     index_data = IndexData(
         samples=boss.get_table_samples(n_tables=n, n_rows=0),
