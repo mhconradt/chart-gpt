@@ -2,8 +2,10 @@ import traceback
 
 import streamlit as st
 
+from chart_gpt import ChartGenerator
+from chart_gpt import ChartIndex
 from chart_gpt import DatabaseCrawler
-from chart_gpt import Index
+from chart_gpt import SQLIndex
 from chart_gpt import SQLGenerator
 from chart_gpt import chat_summarize_data
 from chart_gpt import get_connection
@@ -24,19 +26,27 @@ query_salt = 1234
 
 
 @st.cache_resource
-def c_index(_connection) -> Index:
+def c_database_index(_connection) -> SQLIndex:
     return DatabaseCrawler(_connection).get_index()
 
 
-index = c_index(conn)
+@st.cache_resource
+def c_chart_index() -> ChartIndex:
+    return ChartIndex.create()
 
-generator = SQLGenerator(conn, index)
 
+db_index = c_database_index(conn)
+
+chart_index = c_chart_index()
+
+query_generator = SQLGenerator(conn, db_index)
+
+chart_generator = ChartGenerator(chart_index)
 
 @st.cache_resource
 def generate_query(q, salt):
     print("generate query")
-    return generator.generate_valid_query(q)
+    return query_generator.generate_valid_query(q)
 
 
 @st.cache_data
@@ -57,32 +67,14 @@ if question:
         st.code(query, language="sql")
 
     if st.checkbox("Run query?"):
-        df = run_query(question, query)
-        st.dataframe(df)
+        result = run_query(question, query)
+        st.dataframe(result)
 
-        st.text(chat_summarize_data(df, question, query))
+        st.text(chat_summarize_data(result, question, query))
 
-#    if st.checkbox("Visualize data?"):
-#        ...
-
-# Data
-
-#
-# st.write(df)
-#
-# if len(df):
-#     try:
-#         # viz = display_data(df, conn)
-#         #
-#         # st.altair_chart(viz)
-#         print('Skipping chart generation for query: ', question)
-#     except Exception as e:
-#         traceback.print_exc()
-#
-#     try:
-#         st.text(chat_summarize_data(df, question))
-#     except Exception:
-#         traceback.print_exc()
-#
-# # Chart
-#
+        if len(result) and st.checkbox("Visualize result?"):
+            try:
+                vega_lite_specification = chart_generator.generate(question, query, result)
+                st.vega_lite_chart(result, vega_lite_specification)
+            except Exception as e:
+                traceback.print_exc()

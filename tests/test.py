@@ -6,8 +6,8 @@ from snowflake.connector import SnowflakeConnection
 from tiktoken import Encoding
 
 from chart_gpt import DatabaseCrawler
-from chart_gpt import Index
-from chart_gpt import IndexData
+from chart_gpt import SQLIndex
+from chart_gpt import SQLIndexData
 from chart_gpt import SQLGenerator
 from chart_gpt import get_connection
 
@@ -23,7 +23,7 @@ def database_crawler(database_connection) -> DatabaseCrawler:
 
 
 @pytest.fixture
-def tpc_ds_index_data(database_crawler) -> IndexData:
+def tpc_ds_index_data(database_crawler) -> SQLIndexData:
     if True:
         index_data = database_crawler.get_index_data()
         return index_data
@@ -32,7 +32,7 @@ def tpc_ds_index_data(database_crawler) -> IndexData:
 @pytest.fixture
 def tpc_ds_index(tpc_ds_index_data):
     if True:
-        return Index.from_data(tpc_ds_index_data)
+        return SQLIndex.from_data(tpc_ds_index_data)
 
 
 @pytest.fixture

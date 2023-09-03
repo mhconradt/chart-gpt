@@ -3,8 +3,8 @@ import json
 from pandas import DataFrame
 
 from chart_gpt import DatabaseCrawler
-from chart_gpt import Index
-from chart_gpt import IndexData
+from chart_gpt import SQLIndex
+from chart_gpt import SQLIndexData
 from chart_gpt import get_connection
 
 
@@ -17,11 +17,11 @@ def main():
     conn = get_connection()
     boss = DatabaseCrawler(conn)
     n = 24
-    index_data = IndexData(
+    index_data = SQLIndexData(
         samples=boss.get_table_samples(n_tables=n, n_rows=0),
         descriptions=boss.get_table_descriptions(n=n)
     )
-    index = Index.from_data(index_data)
+    index = SQLIndex.from_data(index_data)
     score_df = query_df.apply(lambda s: index.top_tables(s.query, n=n), axis=1)
     print(score_df)
 
