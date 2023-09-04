@@ -1,4 +1,5 @@
 import traceback
+from datetime import timedelta
 
 import streamlit as st
 
@@ -11,11 +12,12 @@ from chart_gpt import chat_summarize_data
 from chart_gpt import get_connection
 
 # Question
+st.title("ChartGPT")
 
 question = st.text_input("What questions do you have about your data?")
 
 
-@st.cache_resource
+@st.cache_resource(ttl=timedelta(hours=1))
 def c_get_connection():
     return get_connection()
 
@@ -43,17 +45,23 @@ query_generator = SQLGenerator(conn, db_index)
 
 chart_generator = ChartGenerator(chart_index)
 
-@st.cache_resource
+
+@st.cache_resource(show_spinner=False)
 def generate_query(q, salt):
     print("generate query")
     return query_generator.generate_valid_query(q)
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def run_query(q1, q2):
     cursor = conn.cursor()
     cursor.execute("alter session set query_tag = %(question)s;", {'question': q1})
     return cursor.execute(q2).fetch_pandas_all()
+
+
+@st.cache_resource(show_spinner=False)
+def generate_chart(q1, q2, _result):
+    return chart_generator.generate(q1, q2, _result)
 
 
 if question:
@@ -67,8 +75,9 @@ if question:
         st.code(query, language="sql")
 
     if st.checkbox("Run query?"):
-        result = run_query(question, query)
-        st.dataframe(result)
+        with st.spinner("Running query..."):
+            result = run_query(question, query)
+            st.dataframe(result, hide_index=True)
 
         st.text(chat_summarize_data(result, question, query))
 

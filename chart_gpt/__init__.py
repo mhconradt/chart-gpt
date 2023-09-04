@@ -285,8 +285,8 @@ class SQLGenerator:
     def build_prompt(self, question, errors):
         summary = self.get_context(question)
         system_prompt = f"""
-                1. Write a valid SQL query that answers the question/command: {question}.
-                2. Use the following tables: {summary}.
+                1. Write a valid SQL query that answers the question/command: {question}
+                2. Use the following tables: {summary}
                 3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
                 4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
                 5. If the question/command can't be accurately answered by querying the database, return nothing at all.
@@ -320,6 +320,9 @@ class SQLGenerator:
 
     def validate(self, statement: str):
         self.connection.cursor().describe(statement)
+        content = self.connection.cursor().execute(f"explain using text {statement}").fetchone()[0]
+        if 'CartesianJoin' in content:
+            raise ValueError("Query must not use CartesianJoin. This is likely a bug, use union all instead.")
 
     def get_error_prompt(self, messages) -> str:
         if messages:
@@ -410,11 +413,14 @@ class ChartGenerator:
     def generate(self, question: str, query: str, result: DataFrame) -> dict:
         data_values = result.to_dict(orient='records')
         with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+            # TODO: Rationalize the data model to avoid this round-tripping
             prompt = VEGA_LITE_CHART_PROMPT_FORMAT.format(
-                result=data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT],
+                result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT]),
                 question=question,
                 query=query,
-                examples=self.index.top_charts(question, result).tolist()
+                examples=json.dumps(
+                    self.index.top_charts(question, result).map(json.loads).tolist()
+                )
             )
         print(prompt)
         completion = generate_completion(prompt)
