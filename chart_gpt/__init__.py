@@ -364,7 +364,7 @@ class ChartIndex(BaseModel):
         embeddings_df = DataFrame(
             embeddings,
             index=vl_example_names
-        ).rename(lambda i: f"dim_{i}", axis=1)
+        ).rename(lambda i: f"dim_{i}", axis=1).drop(CHART_CONTEXT_EXCLUDE_EXAMPLES)
         specifications_df = DataFrame(
             vl_example_specs_json,
             index=vl_example_names,
