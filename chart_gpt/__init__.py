@@ -104,8 +104,7 @@ class DatabaseCrawler:
         cursor = self.connection.cursor(cursor_class=DictCursor)
         columns = cursor.execute("describe table identifier(%(table_name)s);",
                                  {"table_name": table}).fetchall()
-        df = pd.DataFrame(columns)
-        df = df[[c for c in df.columns if df[c].notna().any()]]
+        df = pd.DataFrame(columns).set_index('name').dropna(axis="columns").transpose()
         return df
 
     def sample_table(self, table: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
@@ -117,18 +116,27 @@ class DatabaseCrawler:
         df = df[[c for c in df.columns if df[c].notna().any()]]
         return df
 
-    def get_table_descriptions(self, n: int = DEFAULT_TABLE_LIMIT) -> dict[str, DataFrame]:
-        return {table: self.describe_table(table) for table in self.show_tables(limit=n)}
+    def get_table_descriptions(self, n: int = DEFAULT_TABLE_LIMIT) -> DataFrame:
+        table_names = self.show_tables(limit=n)
+        return pd.concat(
+            [self.describe_table(table) for table in table_names],
+            keys=table_names,
+            names=['table', 'column'],
+            axis='columns'
+        )
 
     def get_table_samples(
             self,
             n_rows: int = DEFAULT_SAMPLE_LIMIT,
             n_tables: int = DEFAULT_TABLE_LIMIT
-    ) -> dict[str, DataFrame]:
-        return {
-            table: self.sample_table(table, limit=n_rows)
-            for table in self.show_tables(limit=n_tables)
-        }
+    ) -> DataFrame:
+        table_names = self.show_tables(limit=n_tables)
+        return pd.concat(
+            [self.sample_table(table, limit=n_rows) for table in table_names],
+            keys=table_names,
+            names=['table', 'column'],
+            axis='columns'
+        )
 
     def get_index_data(self) -> "SQLIndexData":
         return SQLIndexData(
@@ -165,20 +173,20 @@ def chat_summarize_data(df, question, query):
 
 
 class SQLIndexData(BaseModel):
-    # Maps table name to output of `DESCRIBE TABLE`
-    descriptions: dict[str, DataFrame]
-    # Maps table name to a sample of that table.
-    samples: dict[str, DataFrame]
+    # row index: column_property
+    # column index: (table name, column name)
+    descriptions: DataFrame
+    # row index: i
+    # column index: (table name, column name)
+    samples: DataFrame
 
     class Config:
         arbitrary_types_allowed = True
 
-    def subset(self, tables: Container[str]) -> "SQLIndexData":
+    def subset(self, tables: list[str]) -> "SQLIndexData":
         return SQLIndexData(
-            descriptions={table: description for table, description in self.descriptions.items()
-                          if table in tables},
-            samples={table: sample for table, sample in self.samples.items()
-                     if table in tables},
+            descriptions=self.descriptions[tables],
+            samples=self.samples[tables],
         )
 
 
@@ -199,7 +207,7 @@ class SQLIndex(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def subset(self, tables: Container[str]) -> "SQLIndex":
+    def subset(self, tables: list[str]) -> "SQLIndex":
         return SQLIndex(
             data=self.data.subset(tables),
             embeddings=self.embeddings.loc[tables]
@@ -212,10 +220,7 @@ class SQLIndex(BaseModel):
             strategy: Literal["sample", "semantic"] = "sample"
     ) -> "SQLIndex":
         # [table, column] -> [text]
-        if strategy == "sample":
-            df = cls.get_text_sample(data)
-        elif strategy == "semantic":
-            df = cls.get_text_semantic(data)
+        df = cls.get_text_sample(data)
         response = openai.Embedding.create(input=list(df['text']), engine=SQL_EMBEDDING_MODEL)
         embeddings = df.assign(embedding=[item.embedding for item in response.data]) \
             .embedding \
@@ -224,32 +229,20 @@ class SQLIndex(BaseModel):
         return cls(data=data, embeddings=embeddings)
 
     @classmethod
-    def get_text_semantic(cls, data: SQLIndexData) -> DataFrame:
-        openai.ChatCompletion.create()
-        df = DataFrame([
-            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
-            for table, df in data.samples.items() for column in df.columns
-        ]).set_index(['table', 'column'])
-        return df
-
-    @classmethod
     def get_text_sample(cls, data: SQLIndexData) -> DataFrame:
-        df = DataFrame([
-            {'table': table, 'column': column, 'text': df[[column]].to_markdown(index=False)}
-            for table, df in data.samples.items() for column in df.columns
-        ]).set_index(['table', 'column'])
-        return df
+        return data.samples.apply(
+            lambda s: s.rename_axis(s.name[-1]).to_markdown(index=False)).to_frame(name='text')
 
-    def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> DataFrame:
+    def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> list[str]:
         query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
         table_embeddings = self.embeddings.groupby(level='table').agg(mode)
         table_scores = pd_vss_lookup(table_embeddings, query_embedding, n)
         return table_scores.index.tolist()
 
-    def top_columns(self, query: str, n: int = 5) -> list[str]:
+    def top_columns(self, query: str, n: int = 5) -> list[tuple[str, str]]:
         query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
         column_scores = pd_vss_lookup(self.embeddings, query_embedding, n)
-        return [column for table, column in column_scores.index.tolist()]
+        return column_scores.index.tolist()
 
 
 class SQLGenerator:
@@ -300,29 +293,43 @@ class SQLGenerator:
             question: str,
             n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
             n_rows: int = DEFAULT_CONTEXT_ROW_LIMIT,
-            n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT
+            n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT,
+            block_level: int = 0
     ) -> str:
+        samples = self.index.data.samples
         top_tables = self.index.top_tables(question, n=n_tables)
         with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
-            table_samples = {}
-            for table in top_tables:
-                table_index = self.index.subset([table])
-                columns = table_index.top_columns(question, n_columns)
-                table_samples[table] = self.index.data.samples[table][columns].head(n_rows)
-            summary = SUMMARY_DELIMITER.join([
-                TABLE_SUMMARY_FORMAT.format(
-                    table=table,
-                    sample=sample
+            if block_level == 2:
+                table_samples = samples[top_tables].groupby(level='table', axis=1, group_keys=False) \
+                    .apply(
+                    lambda table_sample: table_sample[
+                        self.index.subset([table_sample.name]).top_columns(question, n_columns)]
                 )
-                for table, sample in table_samples.items()
-            ])
+            elif block_level == 1:
+                cols = self.index.subset(top_tables).top_columns(question, n_tables * n_columns)
+                table_samples = samples[cols]
+            else:
+                table_samples = samples[self.index.top_columns(question, n_tables * n_columns)]
+
+            summary = SUMMARY_DELIMITER.join(
+                table_samples.groupby(level='table', axis='columns')
+                .apply(
+                    lambda table_sample: TABLE_SUMMARY_FORMAT.format(
+                        table=table_sample.name,
+                        sample=table_sample.droplevel('table', axis=1)
+                        .rename_axis(None, axis=1)
+                        .head(n_rows)
+                    )
+                )
+            )
         return summary
 
     def validate(self, statement: str):
         self.connection.cursor().describe(statement)
         content = self.connection.cursor().execute(f"explain using text {statement}").fetchone()[0]
         if 'CartesianJoin' in content:
-            raise ValueError("Query must not use CartesianJoin. This is likely a bug, use union all instead.")
+            raise ValueError(
+                "Query must not use CartesianJoin. This is likely a bug, use union all instead.")
 
     def get_error_prompt(self, messages) -> str:
         if messages:
