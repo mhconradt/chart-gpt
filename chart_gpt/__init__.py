@@ -41,7 +41,7 @@ SQL query result (these will be automatically included in data.values):
 Vega-Lite definition following schema at https://vega.github.io/schema/vega-lite/v5.json:
 """
 
-DEFAULT_CONTEXT_COLUMN_LIMIT = 5
+DEFAULT_CONTEXT_COLUMN_LIMIT = 10
 
 LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_columns", 100,
