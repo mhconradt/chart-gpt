@@ -2,6 +2,7 @@ import json
 
 import pytest
 import tiktoken
+from pandas import DataFrame
 from snowflake.connector import SnowflakeConnection
 from tiktoken import Encoding
 
@@ -30,7 +31,7 @@ def tpc_ds_index_data(database_crawler) -> SQLIndexData:
 
 
 @pytest.fixture
-def tpc_ds_index(tpc_ds_index_data):
+def index(tpc_ds_index_data):
     if True:
         return SQLIndex.from_data(tpc_ds_index_data)
 
@@ -42,8 +43,8 @@ def tpc_ds_questions() -> list[str]:
 
 
 @pytest.fixture
-def sql_generator(database_connection, tpc_ds_index):
-    return SQLGenerator(database_connection, tpc_ds_index)
+def sql_generator(database_connection, index):
+    return SQLGenerator(database_connection, index)
 
 
 @pytest.fixture
@@ -52,8 +53,24 @@ def gpt4_encoding() -> Encoding:
 
 
 def test_get_context(tpc_ds_questions, index, sql_generator, gpt4_encoding):
-    for question in tpc_ds_questions:
-        context = sql_generator.get_context(question)
+    for question in tpc_ds_questions[:5]:
+        context = sql_generator.get_context(question, n_tables=10, n_columns=10)
         tokens = gpt4_encoding.encode(context)
         n_tokens = len(tokens)
         assert n_tokens <= 8192
+
+
+def test_crawler(database_crawler):
+    descriptions = database_crawler.get_table_descriptions(5)
+    assert isinstance(descriptions, DataFrame)
+    assert descriptions.columns.names == ['table', 'column']
+    samples = database_crawler.get_table_samples(n_rows=5, n_tables=5)
+    assert isinstance(samples, DataFrame)
+    assert samples.columns.names == ['table', 'column']
+
+
+def test_index(database_crawler):
+    index_data = database_crawler.get_index_data()
+    text = SQLIndex.get_text_sample(index_data)
+    assert text.index.names == ['table', 'column']
+    assert text.columns == ['text']
