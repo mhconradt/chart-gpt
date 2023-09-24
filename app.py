@@ -2,6 +2,7 @@ import traceback
 from datetime import timedelta
 
 import streamlit as st
+from pandas import DataFrame
 
 from chart_gpt import ChartGenerator
 from chart_gpt import ChartIndex
@@ -17,14 +18,16 @@ st.title("ChartGPT")
 question = st.text_input("What questions do you have about your data?")
 
 
+if 'query_salt' not in st.session_state:
+    st.session_state.query_salt = 0
+
+
 @st.cache_resource(ttl=timedelta(hours=1))
 def c_get_connection():
     return get_connection()
 
 
 conn = c_get_connection()
-
-query_salt = 1234
 
 
 @st.cache_resource
@@ -45,6 +48,8 @@ query_generator = SQLGenerator(conn, db_index)
 
 chart_generator = ChartGenerator(chart_index)
 
+result = DataFrame()
+
 
 @st.cache_resource(show_spinner=False)
 def generate_query(q, salt):
@@ -64,12 +69,17 @@ def generate_chart(q1, q2, _result):
     return chart_generator.generate(q1, q2, _result)
 
 
+@st.cache_resource(show_spinner=False)
+def summarize_data(q1, q2, _result):
+    return chat_summarize_data(_result, q1, q2)
+
+
 if question:
     if st.button("Regenerate query"):
-        query_salt += 1
+        st.session_state.query_salt += 1
 
     with st.spinner("Generating query..."):
-        query = generate_query(question, query_salt)
+        query = generate_query(question, st.session_state.query_salt)
 
     if st.toggle("Show query"):
         st.code(query, language="sql")
@@ -79,11 +89,12 @@ if question:
             result = run_query(question, query)
             st.dataframe(result, hide_index=True)
 
-        st.text(chat_summarize_data(result, question, query))
+    if len(result):
+        st.text(summarize_data(question, query, result))
 
-        if len(result) and st.checkbox("Visualize result?"):
-            try:
-                vega_lite_specification = chart_generator.generate(question, query, result)
-                st.vega_lite_chart(result, vega_lite_specification)
-            except Exception as e:
-                traceback.print_exc()
+    if len(result) and st.checkbox("Visualize result?"):
+        try:
+            vega_lite_specification = chart_generator.generate(question, query, result)
+            st.vega_lite_chart(result, vega_lite_specification)
+        except Exception as e:
+            traceback.print_exc()
