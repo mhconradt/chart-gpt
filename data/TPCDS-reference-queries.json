@@ -1,0 +1,393 @@
+[
+  {
+    "question": "How many call centers are there?",
+    "query": "select count(*) from call_center;",
+    "columns": [],
+    "tables": [
+      "call_center"
+    ]
+  },
+  {
+    "question": "Describe the most visited CATALOG_PAGE.",
+    "query": "select cp_description from catalog_page where cp_catalog_page_sk = (\n    select cs_catalog_page_sk from catalog_sales where cs_catalog_page_sk is not null group by 1 order by count(*) desc limit 1\n);",
+    "columns": [
+      "cp_description",
+      "cp_catalog_page_sk",
+      "cs_catalog_page_sk"
+    ],
+    "tables": [
+      "catalog_page",
+      "catalog_sales"
+    ]
+  },
+  {
+    "question": "Which product has the highest return rate in CATALOG_RETURNS?",
+    "query": "select i_product_name from item where i_item_sk = (\n    select cr_item_sk from catalog_returns group by all order by count(*) desc limit 1\n);",
+    "columns": [
+      "i_product_name",
+      "i_item_sk",
+      "cr_item_sk"
+    ],
+    "tables": [
+      "item",
+      "catalog_returns"
+    ]
+  },
+  {
+    "question": "What's the revenue from CATALOG_SALES in January?",
+    "query": "select sum(cs_net_paid) from catalog_sales where cs_sold_date_sk in (\n    select d_date_sk from date_dim where d_moy = 1\n);",
+    "columns": [
+      "cs_net_paid",
+      "cs_sold_date_sk",
+      "d_date_sk",
+      "d_moy"
+    ]
+  },
+  {
+    "question": "Identify our oldest CUSTOMER.",
+    "query": "select c_first_name, c_last_name from customer order by c_birth_year limit 1;\n",
+    "columns": [
+      "c_first_name",
+      "c_last_name",
+      "c_birth_year"
+    ],
+    "tables": [
+      "customer"
+    ]
+  },
+  {
+    "question": "Where does Mr. Smith live?",
+    "query": "select\n    ca_street_number,\n    ca_street_name,\n    ca_street_type,\n    ca_city,\n    ca_state,\n    ca_zip,\n    ca_country\nfrom customer_address where ca_address_sk in (\n    select c_current_addr_sk from customer where c_salutation = 'Mr.' and c_last_name = 'Smith'\n);",
+    "columns": [
+      "ca_street_number",
+      "ca_street_name",
+      "ca_street_type",
+      "ca_city",
+      "ca_state",
+      "ca_zip",
+      "ca_country",
+      "ca_address_sk",
+      "c_current_addr_sk",
+      "c_salutation",
+      "c_last_name"
+    ],
+    "tables": [
+      "customer_address",
+      "customer"
+    ]
+  },
+  {
+    "question": "Pull the demographics of customers aged 20-30.",
+    "query": "select * from customer_demographics where cd_demo_sk in (\n    select c_current_cdemo_sk from customer where c_birth_year between year(current_date) - 30 and year(current_date) - 20\n) limit 1;",
+    "columns": [
+      "cd_demo_sk",
+      "c_current_cdemo_sk",
+      "c_birth_year"
+    ],
+    "tables": [
+      "customer_demographics",
+      "customer"
+    ]
+  },
+  {
+    "question": "On which dates did we see peak sales?",
+    "query": "with total_sales(date_sk, net_paid) as (\n    select cs_sold_date_sk, cs_net_paid from catalog_sales\n    union all\n    select ss_sold_date_sk, ss_net_paid from store_sales\n    union all\n    select ws_sold_date_sk, ws_net_paid from web_sales\n),\ndaily_sales as (\n    select\n        date_sk,\n        sum(net_paid) total_sales\n    from total_sales\n    group by 1\n)\nselect\n    d_date,\n    total_sales\nfrom daily_sales\ninner join date_dim on daily_sales.date_sk = date_dim.d_date_sk\norder by total_sales nulls last\nlimit 10;",
+    "columns": [
+      "cs_sold_date_sk",
+      "cs_net_paid",
+      "ss_sold_date_sk",
+      "ss_net_paid",
+      "ws_sold_date_sk",
+      "ws_net_paid",
+      "d_date",
+      "d_date_sk"
+    ],
+    "tables": [
+      "catalog_sales",
+      "store_sales",
+      "web_sales",
+      "date_dim"
+    ]
+  },
+  {
+    "question": "What's the average household size in HOUSEHOLD_DEMOGRAPHICS?",
+    "query": "select 1 + avg(hd_dep_count) from household_demographics;\n",
+    "columns": [
+      "hd_dep_count"
+    ],
+    "tables": [
+      "household_demographics"
+    ]
+  },
+  {
+    "question": "Which INCOME_BAND has the most customers?",
+    "query": "select * from income_band where ib_income_band_sk = (\n    select hd_income_band_sk from household_demographics group by 1 order by  count(*) desc limit 1\n);",
+    "columns": [
+      "ib_income_band_sk",
+      "hd_income_band_sk"
+    ],
+    "tables": [
+      "income_band",
+      "household_demographics"
+    ]
+  },
+  {
+    "question": "Show me the current INVENTORY of shoes.",
+    "query": "select\n    sum(inv_quantity_on_hand) total_quantity\nfrom inventory where inv_item_sk in (\n    select\n        i_item_sk\n    from item\n    where\n        i_item_desc ilike '%shoes%'\n        or i_category = 'Shoes'\n        or i_class = 'shoes'\n);",
+    "columns": [
+      "inv_quantity_on_hand",
+      "inv_item_sk",
+      "i_item_sk",
+      "i_item_desc",
+      "i_category",
+      "i_class"
+    ],
+    "tables": [
+      "inventory",
+      "item"
+    ]
+  },
+  {
+    "question": "What's the best selling ITEM?",
+    "query": "with all_item_sales(item_sk, net_paid) as (\n    select\n        cs_item_sk, cs_net_paid\n    from catalog_sales\n    union all\n    select\n        ss_item_sk, ss_net_paid\n    from store_sales\n    union all\n    select\n        ws_item_sk, ws_net_paid\n    from web_sales\n),\ntotal_item_sales as (\n    select\n        item_sk,\n        sum(net_paid) total_sales\n    from all_item_sales\n    group by 1\n)\nselect\n    i_product_name,\n    total_sales\nfrom item\ninner join total_item_sales\n    on item.i_item_sk = total_item_sales.item_sk\norder by 2 desc\nlimit 1;",
+    "columns": [
+      "cs_item_sk",
+      "cs_net_paid",
+      "ss_item_sk",
+      "ss_net_paid",
+      "ws_item_sk",
+      "ws_net_paid",
+      "i_product_name",
+      "i_item_sk"
+    ],
+    "tables": [
+      "catalog_sales",
+      "store_sales",
+      "web_sales",
+      "item"
+    ]
+  },
+  {
+    "question": "Detail the latest PROMOTION.",
+    "query": "select\n    d_date promotion_start_date,\n    p_promo_name,\n    i_product_name\nfrom promotion\ninner join date_dim\n    on p_start_date_sk = d_date_sk\ninner join item\n    on p_item_sk = i_item_sk\norder by d_date desc\nlimit 10;",
+    "columns": [
+      "d_date",
+      "p_promo_name",
+      "i_product_name",
+      "p_start_date_sk",
+      "d_date_sk",
+      "i_item_sk",
+      "p_item_sk"
+    ],
+    "tables": [
+      "date_dim",
+      "promotion",
+      "item"
+    ]
+  },
+  {
+    "question": "Why was the last item returned?",
+    "query": "with all_returns(date_sk, reason_sk) as (\n    select cr_returned_date_sk, cr_reason_sk from catalog_returns\n    union all\n    select sr_returned_date_sk, sr_reason_sk from store_returns\n    union all\n    select wr_returned_date_sk, wr_reason_sk from web_returns\n)\nselect\n    r_reason_id,\n    r_reason_desc\nfrom reason\nwhere r_reason_sk = (\n    select\n        reason_sk\n    from all_returns\n    inner join date_dim\n        on date_dim.d_date_sk = all_returns.date_sk\n    order by d_date_sk\n    limit 1\n);",
+    "columns": [
+      "cr_returned_date_sk",
+      "cr_reason_sk",
+      "sr_returned_date_sk",
+      "sr_reason_sk",
+      "wr_returned_date_sk",
+      "wr_reason_sk",
+      "r_reason_id",
+      "r_reason_desc",
+      "r_reason_k",
+      "d_date",
+      "d_date_sk"
+    ],
+    "tables": [
+      "catalog_returns",
+      "store_returns",
+      "web_returns",
+      "date_dim",
+      "reason"
+    ]
+  },
+  {
+    "question": "Enumerate our SHIP_MODE options.",
+    "query": "select sm_type, sm_code, sm_carrier, sm_contract from ship_mode;\n",
+    "columns": [
+      "sm_type",
+      "sm_code",
+      "sm_carrier",
+      "sm_contract"
+    ],
+    "tables": [
+      "ship_mode"
+    ]
+  },
+  {
+    "question": "Where's our newest STORE located?",
+    "query": "select\n    s_street_number,\n    s_street_name,\n    s_street_type,\n    s_city,\n    s_state,\n    s_zip,\n    s_country\nfrom store\norder by s_rec_start_date desc\nlimit 1;",
+    "columns": [
+      "s_street_number",
+      "s_street_name",
+      "s_street_type",
+      "s_city",
+      "s_state",
+      "s_zip",
+      "s_country"
+    ],
+    "tables": [
+      "store"
+    ]
+  },
+  {
+    "question": "What are the STORE_SALES stats for July?",
+    "query": "select\n    sum(ss_net_paid) revenue,\n    sum(ss_net_profit) profit\nfrom store_sales\nwhere ss_sold_date_sk in (\n    select\n        d_date_sk\n    from date_dim\n    where d_moy = 7\n);",
+    "columns": [
+      "ss_net_paid",
+      "ss_net_profit",
+      "ss_sold_date_sk",
+      "d_date_sk",
+      "d_moy"
+    ],
+    "tables": [
+      "store_sales",
+      "date_dim"
+    ]
+  },
+  {
+    "question": "When's the busiest hour of the day per the TIME_DIM?",
+    "query": "with sale_times(time_sk) as (\n    select\n        cs_sold_time_sk\n    from catalog_sales\n    union all\n    select\n        ss_sold_time_sk\n    from store_sales\n    union all\n    select\n        ws_sold_time_sk\n    from web_sales\n)\nselect\n    t_hour, t_am_pm\nfrom time_dim\ninner join sale_times\n    on time_dim.t_time_sk = sale_times.time_sk\ngroup by t_hour, t_am_pm\norder by count(*) desc\nlimit 1;",
+    "columns": [
+      "cs_sold_time_sk",
+      "ss_sold_time_sk",
+      "ws_sold_time_sk",
+      "t_hour",
+      "t_am_pm",
+      "t_time_sk"
+    ],
+    "tables": [
+      "catalog_sales",
+      "store_sales",
+      "web_sales",
+      "time_dim"
+    ]
+  },
+  {
+    "question": "How big is our biggest WAREHOUSE?",
+    "query": "select max(w_warehouse_sq_ft) from warehouse;\n",
+    "columns": [
+      "w_warehouse_sq_ft"
+    ],
+    "tables": [
+      "warehouse"
+    ]
+  },
+  {
+    "question": "Find me the WEB_PAGE about toys.",
+    "query": "select * from web_page where wp_web_page_sk in (\n    select\n        ws_web_page_sk\n    from web_sales\n    where ws_item_sk in (\n        select i_item_sk from item where i_class = 'toys' or i_category = 'Toys'\n    )\n);\n",
+    "columns": [
+      "ws_web_page_sk",
+      "ws_item_sk",
+      "i_item_sk",
+      "i_class",
+      "i_category"
+    ],
+    "tables": [
+      "web_page",
+      "item",
+      "web_sales"
+    ]
+  },
+  {
+    "question": "How many WEB_RETURNS did we have last week?",
+    "query": "select\n    count(*)\nfrom web_returns\nwhere wr_returned_date_sk in (\n    select\n        d_date_sk\n    from date_dim\n    where d_date between dateadd(week, -1, current_date) and current_date\n);",
+    "columns": [
+      "wr_returned_date_sk",
+      "d_date_sk",
+      "d_date"
+    ],
+    "tables": [
+      "date_dim",
+      "web_returns"
+    ]
+  },
+  {
+    "question": "What's the top-selling product online?",
+    "query": "select i_product_name from item where i_item_sk = (\n    select\n        ws_item_sk\n    from web_sales\n    group by ws_item_sk\n    order by sum(ws_net_paid) desc\n    limit 1\n);\n",
+    "columns": [
+      "i_product_name",
+      "i_item_sk",
+      "ws_item_sk",
+      "ws_net_paid"
+    ],
+    "tables": [
+      "item",
+      "web_sales"
+    ]
+  },
+  {
+    "question": "Which WEB_SITE gets the most traffic?",
+    "query": "select web_name from web_site where web_site_sk = (\n    select\n        ws_web_site_sk\n    from web_sales\n    group by ws_web_site_sk\n    order by count(*) desc\n    limit 1\n);",
+    "columns": [
+      "web_name",
+      "web_site_sk",
+      "ws_web_site_sk"
+    ],
+    "tables": [
+      "web_site",
+      "web_sales"
+    ]
+  },
+  {
+    "question": "Name the customers from Texas.",
+    "query": "select c_first_name, c_last_name from customer where c_current_addr_sk in (\n    select\n        ca_address_sk\n    from customer_address\n    where ca_state = 'TX'\n)\nlimit 100;",
+    "columns": [
+      "c_first_name",
+      "c_last_name",
+      "c_current_addr_sk",
+      "ca_address_sk",
+      "ca_state"
+    ],
+    "tables": [
+      "customer",
+      "customer_address"
+    ]
+  },
+  {
+    "question": "Describe our shipping methods.",
+    "query": "select sm_carrier, sm_type, sm_code from ship_mode;\n",
+    "columns": [
+      "sm_carrier",
+      "sm_type",
+      "sm_code"
+    ],
+    "tables": [
+      "ship_mode"
+    ]
+  },
+  {
+    "question": "Have we had returns from the New York store?",
+    "query": "select count(*) from store_returns where sr_store_sk in (\n    select s_store_sk from store where s_state = 'NY'\n);\n",
+    "columns": [
+      "sr_store_sk",
+      "s_store_sk",
+      "s_state"
+    ],
+    "tables": [
+      "store_returns",
+      "store"
+    ]
+  },
+  {
+    "question": "Show the promotions that ended last month.",
+    "query": "select * from promotion where p_end_date_sk in (\n    select\n        d_date_sk\n    from date_dim\n    where\n        d_date between dateadd(month, -1, current_date) and current_date\n);",
+    "columns": [
+      "p_end_date_sk",
+      "d_date_sk",
+      "d_date"
+    ],
+    "tables": [
+      "promotion",
+      "date_dim"
+    ]
+  }
+]
