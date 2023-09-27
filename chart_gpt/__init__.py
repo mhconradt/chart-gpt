@@ -1,17 +1,12 @@
 import glob
 import json
-import math
 import random
 from os import getenv
-from typing import Container
 from typing import Literal
-from typing import Sequence
 
-import altair as alt
 import numpy as np
 import openai
 import pandas as pd
-from openai.embeddings_utils import cosine_similarity
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
 from pandas import Series
