@@ -257,9 +257,14 @@ class SQLIndex(BaseModel):
             lambda s: s.rename_axis(s.name[-1]).to_markdown(index=False)).to_frame(name='text')
 
     def top_tables(self, query: str, n: int = 5) -> list[str]:
-        query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
-        table_scores = pd_vss_lookup(self.embeddings, query_embedding, n)
-        return table_scores.index.tolist()
+        all_tables = json.dumps(list(self.embeddings.index))
+        completion = generate_completion(f"""
+        Tables: {all_tables}
+        Question: {query}
+        JSON list of tables to query in order to answer question:
+        """, model='gpt-4')
+        tables = extract_json(completion, start='[', stop=']')
+        return tables
 
     def top_context(self, query: str, n: int = 5) -> list[str]:
         return self.context.loc[self.top_tables(query, n)].tolist()
@@ -393,8 +398,8 @@ def get_random_questions():
     return random.choices(get_bootstrap_questions(), k=10)
 
 
-def extract_json(text: str) -> dict:
-    raw = text[text.index('{'):text.rindex('}') + 1]
+def extract_json(text: str, start: str = '{', stop: str = '}') -> dict:
+    raw = text[text.index(start):text.rindex(stop) + 1]
     return json.loads(raw)
 
 
