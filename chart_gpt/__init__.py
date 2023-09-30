@@ -36,7 +36,6 @@ SQL query result (these will be automatically included in data.values):
 Vega-Lite definition following schema at https://vega.github.io/schema/vega-lite/v5.json:
 """
 
-DEFAULT_CONTEXT_COLUMN_LIMIT = 10
 
 LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_columns", 100,
@@ -44,8 +43,8 @@ LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_colwidth", 16
 )
 
-DEFAULT_CONTEXT_ROW_LIMIT = 5
-
+DEFAULT_CONTEXT_ROW_LIMIT = 3
+DEFAULT_CONTEXT_COLUMN_LIMIT = 10
 DEFAULT_CONTEXT_TABLE_LIMIT = 5
 
 TABLE_SUMMARY_FORMAT = """
@@ -238,6 +237,21 @@ class SQLIndex(BaseModel):
         query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
         column_scores = pd_vss_lookup(self.embeddings, query_embedding, n)
         return column_scores.index.tolist()
+
+    def smart_top_columns(self, query: str, block_level: int = -1, n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
+                          n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT) -> list[tuple[str, str]]:
+        top_tables = self.top_tables(query, n=n_tables)
+        if block_level == 2:
+            cols = [
+                (table, column)
+                for table in top_tables
+                for table, column in self.subset([table]).top_columns(query, n=n_columns)
+            ]
+        elif block_level == 1:
+            cols = self.subset(top_tables).top_columns(query, n_tables * n_columns)
+        else:
+            cols = self.top_columns(query, n_tables * n_columns)
+        return cols
 
 
 class SQLGenerator:
