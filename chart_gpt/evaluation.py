@@ -4,8 +4,6 @@ from typing import Optional
 import pandas as pd
 from pandas import DataFrame
 
-from chart_gpt import DEFAULT_CONTEXT_COLUMN_LIMIT
-from chart_gpt import DEFAULT_CONTEXT_TABLE_LIMIT
 from chart_gpt import DatabaseCrawler
 from chart_gpt import SQLIndex
 from chart_gpt import get_connection
@@ -60,31 +58,10 @@ class EvaluationHarness:
     def __init__(self, index: SQLIndex):
         self.index = index
 
-    def run(
-            self,
-            reference_queries: DataFrame,
-            block_level: int = 2,
-            n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
-            n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT
-    ) -> DataFrame:
+    def run(self, reference_queries: DataFrame) -> DataFrame:
         retrieved_tables = reference_queries['question'].map(self.index.top_tables)
-        retrieved_columns = reference_queries['question'].map(
-            lambda question: [
-                tu[1] for tu in self.index.smart_top_columns(
-                    question,
-                    block_level=block_level,
-                    n_tables=n_tables,
-                    n_columns=n_columns
-                )
-            ]
-        )
         table_metrics = compute_evaluation_metrics(reference_queries['tables'], retrieved_tables)
-        column_metrics = compute_evaluation_metrics(reference_queries['columns'], retrieved_columns)
-        return pd.concat(
-            [table_metrics, column_metrics],
-            keys=['table', 'column'],
-            axis=1
-        )
+        return table_metrics
 
 
 def main():
@@ -93,16 +70,8 @@ def main():
     index_data = crawler.get_index_data()
     index = SQLIndex.from_data(index_data)
     harness = EvaluationHarness(index)
-    datasets = ['data/TPC-DS-tables-columns.json', 'data/TPCDS-lite.json']
-    block_levels = [0, 1, 2]
-    n_tables = [5, 10, 20]
-    n_columns = [5, 10, 20]
-    print(harness.run(pd.read_json('data/TPC-DS-tables-columns.json'), block_level=2))
-    print(harness.run(pd.read_json('data/TPCDS-lite.json'), block_level=2))
-    print(harness.run(pd.read_json('data/TPC-DS-tables-columns.json'), block_level=1))
-    print(harness.run(pd.read_json('data/TPCDS-lite.json'), block_level=1))
-    print(harness.run(pd.read_json('data/TPC-DS-tables-columns.json'), block_level=0))
-    print(harness.run(pd.read_json('data/TPCDS-lite.json'), block_level=0))
+    print(harness.run(pd.read_json('data/TPC-DS-tables-columns.json')))
+    print(harness.run(pd.read_json('data/TPCDS-lite.json')))
     pass
 
 

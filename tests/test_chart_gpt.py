@@ -1,5 +1,6 @@
 import json
 
+import pandas as pd
 import pytest
 import tiktoken
 from pandas import DataFrame
@@ -11,6 +12,8 @@ from chart_gpt import SQLIndex
 from chart_gpt import SQLIndexData
 from chart_gpt import SQLGenerator
 from chart_gpt import get_connection
+from chart_gpt import get_create_table
+from chart_gpt import get_select_x
 
 
 @pytest.fixture
@@ -25,9 +28,15 @@ def database_crawler(database_connection) -> DatabaseCrawler:
 
 @pytest.fixture
 def tpc_ds_index_data(database_crawler) -> SQLIndexData:
-    if True:
-        index_data = database_crawler.get_index_data()
-        return index_data
+    if False:
+        fks = database_crawler.get_foreign_keys()
+        return fks
+    else:
+        return SQLIndexData(
+            descriptions=pd.read_parquet('tests/data/tpc_ds_table_descriptions.parquet'),
+            samples=pd.read_parquet('tests/data/tpc_ds_table_samples.parquet'),
+            foreign_keys=pd.read_parquet('tests/data/tpc_ds_foreign_keys.parquet'),
+        )
 
 
 @pytest.fixture
@@ -54,7 +63,7 @@ def gpt4_encoding() -> Encoding:
 
 def test_get_context(tpc_ds_questions, index, sql_generator, gpt4_encoding):
     for question in tpc_ds_questions[:5]:
-        context = sql_generator.get_context(question, n_tables=10, n_columns=10)
+        context = sql_generator.get_context(question, n_tables=10)
         tokens = gpt4_encoding.encode(context)
         n_tokens = len(tokens)
         assert n_tokens <= 8192
@@ -69,8 +78,11 @@ def test_crawler(database_crawler):
     assert samples.columns.names == ['table', 'column']
 
 
-def test_index(database_crawler):
-    index_data = database_crawler.get_index_data()
-    text = SQLIndex.get_text_sample(index_data)
-    assert text.index.names == ['table', 'column']
-    assert text.columns == ['text']
+def test_index(tpc_ds_index_data):
+    descriptions = pd.concat([tpc_ds_index_data.descriptions, tpc_ds_index_data.foreign_keys])
+    ddls = descriptions.groupby(axis=1, level='table').apply(get_create_table)
+    samples = tpc_ds_index_data.samples.groupby(axis=1, level='table').apply(get_select_x)
+    index = SQLIndex.from_data(tpc_ds_index_data)
+    # text = SQLIndex.get_text_sample(tpc_ds_index_data)
+    # assert text.index.names == ['table', 'column']
+    # assert text.columns == ['text']

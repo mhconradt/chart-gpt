@@ -9,6 +9,9 @@ import openai
 import pandas as pd
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
+from pandas import DataFrame
+from pandas import DataFrame
+from pandas import Series
 from pandas import Series
 from pydantic import BaseModel
 from snowflake.connector import DictCursor
@@ -35,7 +38,6 @@ SQL query result (these will be automatically included in data.values):
 {result}
 Vega-Lite definition following schema at https://vega.github.io/schema/vega-lite/v5.json:
 """
-
 
 LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_columns", 100,
@@ -86,6 +88,14 @@ def get_connection():
     )
 
 
+def get_table_context(data: "SQLIndexData") -> Series:
+    descriptions = pd.concat([data.descriptions, data.foreign_keys])
+    ddl = descriptions.groupby(axis=1, level='table').apply(get_create_table)
+    select_x = data.samples.groupby(axis=1, level='table').apply(get_select_x)
+    context = ddl + '\n' + select_x
+    return context
+
+
 class DatabaseCrawler:
     def __init__(self, connection: SnowflakeConnection):
         self.connection = connection
@@ -133,10 +143,25 @@ class DatabaseCrawler:
         )
 
     def get_index_data(self) -> "SQLIndexData":
+        samples = self.get_table_samples()
+        descriptions = self.get_table_descriptions()
+        foreign_keys = self.get_foreign_keys()
         return SQLIndexData(
-            samples=self.get_table_samples(),
-            descriptions=self.get_table_descriptions(),
+            samples=samples,
+            descriptions=descriptions,
+            foreign_keys=foreign_keys,
         )
+
+    def get_foreign_keys(self) -> DataFrame:
+        database, schema = self.connection.cursor().execute(
+            "select current_database(), current_schema();").fetchone()
+        return DataFrame(
+            self.connection.cursor(cursor_class=DictCursor).execute(f"show imported keys in schema {database}.{schema};").fetchall()
+        ).drop_duplicates(['fk_table_name', 'fk_column_name']) \
+            .set_index(['fk_table_name', 'fk_column_name']) \
+            .rename_axis(['table', 'column']) \
+            [['pk_table_name', 'pk_column_name']] \
+            .transpose()
 
     def get_index(self) -> "SQLIndex":
         return SQLIndex.from_data(self.get_index_data())
@@ -173,6 +198,7 @@ class SQLIndexData(BaseModel):
     # row index: i
     # column index: (table name, column name)
     samples: DataFrame
+    foreign_keys: DataFrame
 
     class Config:
         arbitrary_types_allowed = True
@@ -196,7 +222,9 @@ def pd_vss_lookup(index: DataFrame, query: np.array, n: int) -> Series:  # ?
 
 class SQLIndex(BaseModel):
     data: SQLIndexData
+    # (table) -> dim_0, dim_1, ..., dim_n
     embeddings: DataFrame
+    context: Series
 
     class Config:
         arbitrary_types_allowed = True
@@ -214,44 +242,27 @@ class SQLIndex(BaseModel):
             strategy: Literal["sample", "semantic"] = "sample"
     ) -> "SQLIndex":
         # [table, column] -> [text]
-        df = cls.get_text_sample(data)
-        response = openai.Embedding.create(input=list(df['text']), engine=SQL_EMBEDDING_MODEL)
-        embeddings = df.assign(embedding=[item.embedding for item in response.data]) \
-            .embedding \
-            .apply(lambda s: pd.Series(s)) \
-            .rename(lambda i: f'dim_{i}', axis=1)
-        return cls(data=data, embeddings=embeddings)
+        table_context = get_table_context(data)
+        embeddings = DataFrame([
+            item.embedding for item in openai.Embedding.create(
+                input=list(table_context),
+                engine=SQL_EMBEDDING_MODEL
+            ).data
+        ], index=table_context.index).rename(lambda i: f'dim_{i}', axis=1)
+        return cls(data=data, embeddings=embeddings, context=table_context)
 
     @classmethod
     def get_text_sample(cls, data: SQLIndexData) -> DataFrame:
         return data.samples.apply(
             lambda s: s.rename_axis(s.name[-1]).to_markdown(index=False)).to_frame(name='text')
 
-    def top_tables(self, query: str, n: int = 5, mode: Literal['sum', 'mean'] = 'sum') -> list[str]:
+    def top_tables(self, query: str, n: int = 5) -> list[str]:
         query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
-        table_embeddings = self.embeddings.groupby(level='table').agg(mode)
-        table_scores = pd_vss_lookup(table_embeddings, query_embedding, n)
+        table_scores = pd_vss_lookup(self.embeddings, query_embedding, n)
         return table_scores.index.tolist()
 
-    def top_columns(self, query: str, n: int = 5) -> list[tuple[str, str]]:
-        query_embedding = np.array(get_embedding(query, engine=SQL_EMBEDDING_MODEL))
-        column_scores = pd_vss_lookup(self.embeddings, query_embedding, n)
-        return column_scores.index.tolist()
-
-    def smart_top_columns(self, query: str, block_level: int = -1, n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
-                          n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT) -> list[tuple[str, str]]:
-        top_tables = self.top_tables(query, n=n_tables)
-        if block_level == 2:
-            cols = [
-                (table, column)
-                for table in top_tables
-                for table, column in self.subset([table]).top_columns(query, n=n_columns)
-            ]
-        elif block_level == 1:
-            cols = self.subset(top_tables).top_columns(query, n_tables * n_columns)
-        else:
-            cols = self.top_columns(query, n_tables * n_columns)
-        return cols
+    def top_context(self, query: str, n: int = 5) -> list[str]:
+        return self.context.loc[self.top_tables(query, n)].tolist()
 
 
 class SQLGenerator:
@@ -287,50 +298,15 @@ class SQLGenerator:
     def build_prompt(self, question, errors):
         summary = self.get_context(question)
         system_prompt = f"""
-                1. Write a valid SQL query that answers the question/command: {question}
-                2. Use the following tables: {summary}
-                3. Include absolutely nothing but the SQL query, especially not markdown syntax. It should start with WITH or SELECT and end with ;
-                4. Always include a LIMIT clause and include no more than but potentially less than 100 rows.
-                5. If the question/command can't be accurately answered by querying the database, return nothing at all.
-                6. If the values in a column are only meaningful to a computer and not to a domain expert, do not include it. For example, prefer using names vs. IDs.
+                Write a valid Snowflake SQL query that answers the question/command: {question}
+                Use the following tables: {summary}
                 {self.get_error_prompt(errors)}
             """
         return system_prompt
 
-    def get_context(
-            self,
-            question: str,
-            n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT,
-            n_rows: int = DEFAULT_CONTEXT_ROW_LIMIT,
-            n_columns: int = DEFAULT_CONTEXT_COLUMN_LIMIT,
-            block_level: int = 0
-    ) -> str:
-        samples = self.index.data.samples
-        top_tables = self.index.top_tables(question, n=n_tables)
-        with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
-            if block_level == 2:
-                table_samples = samples[top_tables].groupby(level='table', axis=1, group_keys=False) \
-                    .apply(
-                    lambda table_sample: table_sample[
-                        self.index.subset([table_sample.name]).top_columns(question, n_columns)]
-                )
-            elif block_level == 1:
-                cols = self.index.subset(top_tables).top_columns(question, n_tables * n_columns)
-                table_samples = samples[cols]
-            else:
-                table_samples = samples[self.index.top_columns(question, n_tables * n_columns)]
-
-            summary = SUMMARY_DELIMITER.join(
-                table_samples.groupby(level='table', axis='columns')
-                .apply(
-                    lambda table_sample: TABLE_SUMMARY_FORMAT.format(
-                        table=table_sample.name,
-                        sample=table_sample.droplevel('table', axis=1)
-                        .rename_axis(None, axis=1)
-                        .head(n_rows)
-                    )
-                )
-            )
+    def get_context(self, question: str, n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT) -> str:
+        context = self.index.top_context(question, n_tables)
+        summary = SUMMARY_DELIMITER.join(context)
         return summary
 
     def validate(self, statement: str):
@@ -445,3 +421,35 @@ class ChartGenerator:
         # TODO: Validate using JSON Schema, feed errors back into the model.
         # specification['data'] = {'values': data_values}
         return specification
+
+
+def get_column_ddl(column: Series) -> str:
+    # https://docs.snowflake.com/en/sql-reference/sql/create-table#syntax
+    parts = [column.name[1], column['type']]
+    if isinstance(column['pk_table_name'], str):
+        fk_table, fk_column = column['pk_table_name'], column['pk_column_name']
+        parts.append(f"REFERENCES {fk_table}({fk_column})")
+    if column['null?'] == 'N':
+        parts.append('NOT NULL')
+    if column['primary key'] == 'Y':
+        parts.append('PRIMARY KEY')
+    return " ".join(parts)
+
+
+def get_create_table(description: DataFrame) -> str:
+    columns = description.apply(get_column_ddl)
+    all_columns = ",\n    ".join(columns)
+    # Does whitespace matter here?
+    return f"""CREATE TABLE {description.name} ( {all_columns} );"""
+
+
+def get_select_x(sample: DataFrame, n_rows: int = 3) -> str:
+    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+        parts = [
+            "/*",
+            f"{n_rows} example rows:",
+            f"SELECT * FROM {sample.name} LIMIT {n_rows};",
+            str(sample.droplevel(0, axis=1).rename_axis(None, axis=1).head(n_rows)),
+            "*/"
+        ]
+        return "\n".join(parts)
