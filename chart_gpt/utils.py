@@ -1,4 +1,6 @@
 import json
+import logging
+import sys
 from datetime import date
 from datetime import datetime
 from os import getenv
@@ -7,7 +9,16 @@ import numpy as np
 import openai
 from pandas import DataFrame
 from pandas import Series
+from pydantic import BaseModel
 from snowflake.connector import connect
+
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+
+class ChartGptModel(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
 
 
 def get_connection():
@@ -22,13 +33,15 @@ def get_connection():
     )
 
 
-def generate_completion(system_prompt, model: str = 'gpt-4'):
+def generate_completion(prompt: str, model: str = 'gpt-4') -> str:
+    logger.debug("Getting %s completion for prompt %s", model, prompt)
     response = openai.ChatCompletion.create(
         model=model,
         messages=[
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": prompt}
         ]
     ).choices[0].message.content
+    logger.debug("Completion %s", prompt)
     return response
 
 

@@ -31,7 +31,7 @@ conn = c_get_connection()
 
 @st.cache_resource
 def c_database_index(_connection) -> SQLIndex:
-    return DatabaseCrawler(_connection).get_index()
+    return DatabaseCrawler(connection=_connection).get_index()
 
 
 @st.cache_resource
@@ -45,7 +45,7 @@ chart_index = c_chart_index()
 
 query_generator = SQLGenerator(conn, db_index)
 
-chart_generator = ChartGenerator(chart_index)
+chart_generator = ChartGenerator(chart_index=chart_index)
 
 result = DataFrame()
 

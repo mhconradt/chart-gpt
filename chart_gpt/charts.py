@@ -1,17 +1,22 @@
 import glob
 import json
+import logging
+import sys
 
 import numpy as np
 import openai
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
 from pandas import Series
-from pydantic import BaseModel
 
+from chart_gpt.utils import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
 from chart_gpt.utils import json_dumps_default
 from chart_gpt.utils import pd_vss_lookup
+
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 CHART_CONTEXT_EXCLUDE_EXAMPLES = [
     "layer_likert",  # 4532
@@ -33,7 +38,7 @@ Vega-Lite definition following schema at https://vega.github.io/schema/vega-lite
 CHART_EMBEDDING_MODEL = 'text-embedding-ada-002'
 
 
-class ChartIndex(BaseModel):
+class ChartIndex(ChartGptModel):
     # [chart_id] -> [specification]
     specifications: DataFrame
     # [chart_id] -> [dim_0, dim_1, ..., dim_n]
@@ -72,6 +77,7 @@ class ChartIndex(BaseModel):
         Finds the most relevant chart specifications to the given question and data.
         :return: Series [chart_id] -> specification
         """
+        logger.info("Finding examples for question: %s", question)
         embedding_query_string = json.dumps(
             {
                 "title": question,
@@ -85,26 +91,27 @@ class ChartIndex(BaseModel):
             get_embedding(embedding_query_string, engine=CHART_EMBEDDING_MODEL)
         )
         chart_ids = pd_vss_lookup(self.embeddings, embedding_query, n=3).index.tolist()
-        return self.specifications.specification.loc[chart_ids]
+        examples = self.specifications.specification.loc[chart_ids].map(json.loads).tolist()
+        logger.info("Found examples: %s", examples)
+        return examples
 
 
-class ChartGenerator:
-    def __init__(self, index: ChartIndex):
-        self.index = index
+class ChartGenerator(ChartGptModel):
+    index: ChartIndex
 
     def generate(self, question: str, query: str, result: DataFrame) -> dict:
+        logger.info("Generating chart for question: %s", question)
         data_values = result.to_dict(orient='records')
+        top_charts = self.index.top_charts(question, result)
+        sample_data = data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT]
         prompt = VEGA_LITE_CHART_PROMPT_FORMAT.format(
-            result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT],
-                              default=json_dumps_default),
+            result=json.dumps(sample_data, default=json_dumps_default),
             question=question,
             query=query,
-            examples=json.dumps(
-                self.index.top_charts(question, result).map(json.loads).tolist(),
-                default=json_dumps_default
-            )
+            examples=json.dumps(top_charts, default=json_dumps_default)
         )
         completion = generate_completion(prompt)
         specification = extract_json(completion)
         specification['data'] = {'values': data_values}
+        logger.info("Generated chart %s", specification)
         return specification

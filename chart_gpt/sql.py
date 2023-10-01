@@ -1,3 +1,7 @@
+import logging
+import sys
+import time
+
 import pandas as pd
 from pandas import DataFrame
 from pandas import Series
@@ -5,8 +9,12 @@ from pydantic import BaseModel
 from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 
+from chart_gpt.utils import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
+
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # These have really high token counts
 
@@ -24,13 +32,6 @@ SQL_EMBEDDING_MODEL = 'text-embedding-ada-002'
 SUMMARY_DELIMITER = '\n' + '-' * 128 + '\n'
 
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-# Planning: Determine the list of columns and the chart type
-
-
 def get_table_context(data: "SQLIndexData") -> Series:
     descriptions = pd.concat([data.descriptions, data.foreign_keys])
     ddl = descriptions.groupby(axis=1, level='table').apply(get_create_table)
@@ -39,11 +40,11 @@ def get_table_context(data: "SQLIndexData") -> Series:
     return context
 
 
-class DatabaseCrawler:
-    def __init__(self, connection: SnowflakeConnection):
-        self.connection = connection
+class DatabaseCrawler(ChartGptModel):
+    connection: SnowflakeConnection
 
     def show_tables(self) -> list[str]:
+        logger.info("Listing tables")
         cursor = self.connection.cursor(cursor_class=DictCursor)
         query = "show tables;"
         tables = cursor.execute(query).fetchall()
@@ -51,6 +52,7 @@ class DatabaseCrawler:
         return table_names
 
     def describe_table(self, table: str) -> DataFrame:
+        logger.debug("Getting description for table %s", table)
         cursor = self.connection.cursor(cursor_class=DictCursor)
         query = "describe table identifier(%(table_name)s);"
         parameters = {"table_name": table}
@@ -59,6 +61,7 @@ class DatabaseCrawler:
         return df
 
     def sample_table(self, table: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
+        logger.debug("Sampling %d rows from table %s", limit, table)
         cursor = self.connection.cursor(cursor_class=DictCursor)
         query = "select * from identifier(%(table_name)s) sample (%(limit)s rows);"
         parameters = {"table_name": table, "limit": limit}
@@ -67,28 +70,30 @@ class DatabaseCrawler:
         df = df.dropna(axis=1)
         return df
 
-    def get_table_descriptions(self) -> DataFrame:
-        table_names = self.show_tables()
+    def get_table_descriptions(self, tables: list[str]) -> DataFrame:
         return pd.concat(
-            [self.describe_table(table) for table in table_names],
-            keys=table_names,
+            [self.describe_table(table) for table in tables],
+            keys=tables,
             names=['table', 'column'],
             axis=1
         )
 
-    def get_table_samples(self, n_rows: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
-        table_names = self.show_tables()
+    def get_table_samples(self, tables: list[str], n_rows: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
         return pd.concat(
-            [self.sample_table(table, limit=n_rows) for table in table_names],
-            keys=table_names,
+            [self.sample_table(table, limit=n_rows) for table in tables],
+            keys=tables,
             names=['table', 'column'],
             axis=1
         )
 
     def get_index_data(self) -> "SQLIndexData":
-        samples = self.get_table_samples()
-        descriptions = self.get_table_descriptions()
+        t0 = time.perf_counter()
+        logger.info("Indexing tables")
+        tables = self.show_tables()
+        samples = self.get_table_samples(tables)
+        descriptions = self.get_table_descriptions(tables)
         foreign_keys = self.get_foreign_keys()
+        logger.info("Indexing tables took %.3f seconds", time.perf_counter() - t0)
         return SQLIndexData(
             samples=samples,
             descriptions=descriptions,
@@ -96,8 +101,9 @@ class DatabaseCrawler:
         )
 
     def get_foreign_keys(self) -> DataFrame:
+        query = "select current_database(), current_schema();"
         database, schema = self.connection.cursor().execute(
-            "select current_database(), current_schema();").fetchone()
+            query).fetchone()
         cursor = self.connection.cursor(cursor_class=DictCursor)
         query = f"show imported keys in schema {database}.{schema};"
         foreign_keys = DataFrame(cursor.execute(query).fetchall())
@@ -119,7 +125,7 @@ def postprocess_generated_sql(answer: str) -> str:
     return answer[start_index:stop_index].strip()
 
 
-def chat_summarize_data(df, question, query):
+def chat_summarize_data(df: DataFrame, question: str, query: str) -> str:
     with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
         return generate_completion(f"""
             User's question: {question}.
@@ -129,7 +135,7 @@ def chat_summarize_data(df, question, query):
         """, model='gpt-3.5-turbo')
 
 
-class SQLIndexData(BaseModel):
+class SQLIndexData(ChartGptModel):
     # row index: column_property
     # column index: (table name, column name)
     descriptions: DataFrame
@@ -146,14 +152,11 @@ class SQLIndexData(BaseModel):
         return list(self.samples.columns.levels[0])
 
 
-class SQLIndex(BaseModel):
+class SQLIndex(ChartGptModel):
     data: SQLIndexData
     # (table) -> dim_0, dim_1, ..., dim_n
     embeddings: DataFrame
     context: Series
-
-    class Config:
-        arbitrary_types_allowed = True
 
     @classmethod
     def from_data(cls, data: SQLIndexData) -> "SQLIndex":
@@ -181,6 +184,7 @@ class SQLGenerator:
         self.index = index
 
     def generate_valid_query(self, question: str) -> str:
+        logger.info("Generating query for question: %s")
         errors = []
         n = 1
         while True:
@@ -189,13 +193,14 @@ class SQLGenerator:
             try:
                 self.validate(statement)
             except Exception as e:
-                errors.append(f"Query {n}/3: {statement}. Error: {e}")
-                print(f"BAD: {statement}")
+                errors.append(f"Query: {statement}. Error: {e}")
+                logging.warning("Invalid query (%d/3): %s. Error %s", n, statement, e,
+                                stack_info=False)
                 n += 1
                 if n > 3:
                     raise
             else:
-                print(f"GOOD: {statement}")
+                logging.info("Generated valid query: %s")
                 return statement
 
     def generate(self, prompt):
