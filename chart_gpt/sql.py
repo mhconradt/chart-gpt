@@ -45,22 +45,26 @@ class DatabaseCrawler:
 
     def show_tables(self) -> list[str]:
         cursor = self.connection.cursor(cursor_class=DictCursor)
-        return [table['name'] for table in cursor.execute("show tables;").fetchall()]
+        query = "show tables;"
+        tables = cursor.execute(query).fetchall()
+        table_names = [table['name'] for table in tables]  # type: ignore
+        return table_names
 
     def describe_table(self, table: str) -> DataFrame:
         cursor = self.connection.cursor(cursor_class=DictCursor)
-        columns = cursor.execute("describe table identifier(%(table_name)s);",
-                                 {"table_name": table}).fetchall()
-        df = pd.DataFrame(columns).set_index('name').dropna(axis="columns").transpose()
+        query = "describe table identifier(%(table_name)s);"
+        parameters = {"table_name": table}
+        columns = cursor.execute(query, parameters).fetchall()
+        df = pd.DataFrame(columns).set_index('name').dropna(axis=1).transpose()
         return df
 
     def sample_table(self, table: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
         cursor = self.connection.cursor(cursor_class=DictCursor)
-        columns = cursor.execute(
-            "select * from identifier(%(table_name)s) sample (%(limit)s rows);",
-            {"table_name": table, "limit": limit}).fetchall()
+        query = "select * from identifier(%(table_name)s) sample (%(limit)s rows);"
+        parameters = {"table_name": table, "limit": limit}
+        columns = cursor.execute(query, parameters).fetchall()
         df = pd.DataFrame(columns)
-        df = df[[c for c in df.columns if df[c].notna().any()]]
+        df = df.dropna(axis=1)
         return df
 
     def get_table_descriptions(self) -> DataFrame:
@@ -69,7 +73,7 @@ class DatabaseCrawler:
             [self.describe_table(table) for table in table_names],
             keys=table_names,
             names=['table', 'column'],
-            axis='columns'
+            axis=1
         )
 
     def get_table_samples(self, n_rows: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
@@ -78,7 +82,7 @@ class DatabaseCrawler:
             [self.sample_table(table, limit=n_rows) for table in table_names],
             keys=table_names,
             names=['table', 'column'],
-            axis='columns'
+            axis=1
         )
 
     def get_index_data(self) -> "SQLIndexData":
@@ -95,13 +99,14 @@ class DatabaseCrawler:
         database, schema = self.connection.cursor().execute(
             "select current_database(), current_schema();").fetchone()
         cursor = self.connection.cursor(cursor_class=DictCursor)
-        return DataFrame(
-            cursor.execute(f"show imported keys in schema {database}.{schema};").fetchall()
-        ).drop_duplicates(['fk_table_name', 'fk_column_name']) \
-            .set_index(['fk_table_name', 'fk_column_name']) \
-            .rename_axis(['table', 'column']) \
-            [['pk_table_name', 'pk_column_name']] \
-            .transpose()
+        query = f"show imported keys in schema {database}.{schema};"
+        foreign_keys = DataFrame(cursor.execute(query).fetchall())
+        deduplicated = foreign_keys.drop_duplicates(['fk_table_name', 'fk_column_name'])
+        indexed = deduplicated.set_index(['fk_table_name', 'fk_column_name'])  # type: ignore
+        renamed = indexed.rename_axis(['table', 'column'])
+        selected = renamed[['pk_table_name', 'pk_column_name']]
+        transposed = selected.transpose()
+        return transposed
 
     def get_index(self) -> "SQLIndex":
         return SQLIndex.from_data(self.get_index_data())
@@ -228,7 +233,7 @@ class SQLGenerator:
 
 def get_column_ddl(column: Series) -> str:
     # https://docs.snowflake.com/en/sql-reference/sql/create-table#syntax
-    parts = [column.name[1], column['type']]
+    parts = [column.name[1], column['type']]  # type: ignore
     if isinstance(column['pk_table_name'], str):
         fk_table, fk_column = column['pk_table_name'], column['pk_column_name']
         parts.append(f"REFERENCES {fk_table}({fk_column})")

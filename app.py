@@ -17,7 +17,6 @@ st.title("ChartGPT 📈")
 
 question = st.text_input("What questions do you have about your data?")
 
-
 if 'query_salt' not in st.session_state:
     st.session_state.query_salt = 0
 
@@ -52,7 +51,7 @@ result = DataFrame()
 
 
 @st.cache_resource(show_spinner=False)
-def generate_query(q, salt):
+def generate_query(q, salt):  # noqa: Salt is needed to force regeneration
     return query_generator.generate_valid_query(q)
 
 
@@ -94,5 +93,5 @@ if question:
         try:
             vega_lite_specification = chart_generator.generate(question, query, result)
             st.vega_lite_chart(result, vega_lite_specification)
-        except Exception as e:
+        except (Exception,) as e:
             traceback.print_exc()
