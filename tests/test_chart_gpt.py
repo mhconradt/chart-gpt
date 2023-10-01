@@ -14,6 +14,7 @@ from chart_gpt import SQLGenerator
 from chart_gpt import get_connection
 from chart_gpt import get_create_table
 from chart_gpt import get_select_x
+from chart_gpt import postprocess_generated_sql
 
 
 @pytest.fixture
@@ -69,6 +70,11 @@ def test_get_context(tpc_ds_questions, index, sql_generator, gpt4_encoding):
         assert n_tokens <= 8192
 
 
+def test_generate(tpc_ds_questions, sql_generator):
+    for question in tpc_ds_questions:
+        generated = sql_generator.generate(question)
+
+
 def test_crawler(database_crawler):
     descriptions = database_crawler.get_table_descriptions(5)
     assert isinstance(descriptions, DataFrame)
@@ -86,3 +92,8 @@ def test_index(tpc_ds_index_data):
     # text = SQLIndex.get_text_sample(tpc_ds_index_data)
     # assert text.index.names == ['table', 'column']
     # assert text.columns == ['text']
+
+
+def test_postprocess_sql():
+    query = postprocess_generated_sql("```sql select * from foo; ``` Foo bar is the ...")
+    assert query == "select * from foo;"

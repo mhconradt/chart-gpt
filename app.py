@@ -53,7 +53,6 @@ result = DataFrame()
 
 @st.cache_resource(show_spinner=False)
 def generate_query(q, salt):
-    print("generate query")
     return query_generator.generate_valid_query(q)
 
 
@@ -81,8 +80,7 @@ if question:
     with st.spinner("Generating query..."):
         query = generate_query(question, st.session_state.query_salt)
 
-    if st.toggle("Show query"):
-        st.code(query, language="sql")
+    st.code(query, language="sql")
 
     if st.checkbox("Run query?"):
         with st.spinner("Running query..."):

@@ -175,8 +175,11 @@ def generate_completion(system_prompt, model: str = SQL_GENERATION_MODEL):
     return response
 
 
-def postprocess_generated_sql(answer):
-    return answer.removeprefix('```sql').removeprefix('```SQL').removesuffix('```')
+def postprocess_generated_sql(answer: str) -> str:
+    start, stop = '```sql', '```'
+    start_index = answer.index(start) + len(start)
+    stop_index = answer.index(stop, start_index)
+    return answer[start_index:stop_index].strip()
 
 
 def chat_summarize_data(df, question, query):
@@ -290,8 +293,7 @@ class SQLGenerator:
                 return statement
 
     def generate(self, prompt):
-        response = generate_completion(prompt)
-        answer = response
+        answer = generate_completion(prompt)
         statement = postprocess_generated_sql(answer)
         return statement
 
@@ -300,6 +302,7 @@ class SQLGenerator:
         system_prompt = f"""
                 Write a valid Snowflake SQL query that answers the question/command: {question}
                 Use the following tables: {summary}
+                The query should be in markdown format: beginning with ```sql and ending with ```.
                 {self.get_error_prompt(errors)}
             """
         return system_prompt
