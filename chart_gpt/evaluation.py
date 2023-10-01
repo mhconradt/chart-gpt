@@ -6,7 +6,7 @@ from pandas import DataFrame
 
 from chart_gpt import DatabaseCrawler
 from chart_gpt import SQLIndex
-from chart_gpt import get_connection
+from chart_gpt.utils import get_connection
 
 
 def precision_recall_f1(
@@ -24,7 +24,6 @@ def precision_recall_f1(
         recall = len(intersection) / len(b)
     except ZeroDivisionError:
         recall = None
-    f1 = None
     try:
         f1 = compute_f1(precision, recall)
     except (TypeError, ZeroDivisionError):

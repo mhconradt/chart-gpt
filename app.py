@@ -10,7 +10,7 @@ from chart_gpt import DatabaseCrawler
 from chart_gpt import SQLIndex
 from chart_gpt import SQLGenerator
 from chart_gpt import chat_summarize_data
-from chart_gpt import get_connection
+from chart_gpt.utils import get_connection
 
 # Question
 st.title("ChartGPT 📈")
