@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import pandas as pd
@@ -14,6 +15,7 @@ from chart_gpt import SQLGenerator
 from chart_gpt import get_connection
 from chart_gpt import get_create_table
 from chart_gpt import get_select_x
+from chart_gpt import json_dumps_default
 from chart_gpt import postprocess_generated_sql
 
 
@@ -97,3 +99,7 @@ def test_index(tpc_ds_index_data):
 def test_postprocess_sql():
     query = postprocess_generated_sql("```sql select * from foo; ``` Foo bar is the ...")
     assert query == "select * from foo;"
+
+
+def test_json_dumps_default():
+    assert json_dumps_default(datetime.date(2000, 2, 14)) == "2000-02-14"

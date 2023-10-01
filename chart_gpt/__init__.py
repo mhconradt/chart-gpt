@@ -1,6 +1,8 @@
 import glob
 import json
 import random
+from datetime import date
+from datetime import datetime
 from os import getenv
 
 import numpy as np
@@ -372,13 +374,15 @@ class ChartIndex(BaseModel):
         Finds the most relevant chart specifications to the given question and data.
         :return: Series [chart_id] -> specification
         """
+        print(data.head(CHART_DEFAULT_CONTEXT_ROW_LIMIT).to_dict(orient="records"))
         embedding_query_string = json.dumps(
             {
                 "title": question,
                 "data": {
                     "values": data.head(CHART_DEFAULT_CONTEXT_ROW_LIMIT).to_dict(orient="records")
                 }
-            }
+            },
+            default=json_dumps_default
         )
         embedding_query = np.array(
             get_embedding(embedding_query_string, engine=CHART_EMBEDDING_MODEL)
@@ -401,6 +405,12 @@ def extract_json(text: str, start: str = '{', stop: str = '}') -> dict:
     return json.loads(raw)
 
 
+def json_dumps_default(o):
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    raise TypeError(f"Object {o} not JSON serializable")
+
+
 class ChartGenerator:
     def __init__(self, index: ChartIndex):
         self.index = index
@@ -410,11 +420,12 @@ class ChartGenerator:
         with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
             # TODO: Rationalize the data model to avoid this round-tripping
             prompt = VEGA_LITE_CHART_PROMPT_FORMAT.format(
-                result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT]),
+                result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT], default=json_dumps_default),
                 question=question,
                 query=query,
                 examples=json.dumps(
-                    self.index.top_charts(question, result).map(json.loads).tolist()
+                    self.index.top_charts(question, result).map(json.loads).tolist(),
+                    default=json_dumps_default
                 )
             )
         print(prompt)
@@ -422,7 +433,7 @@ class ChartGenerator:
         print(completion)
         specification = extract_json(completion)
         # TODO: Validate using JSON Schema, feed errors back into the model.
-        # specification['data'] = {'values': data_values}
+        specification['data'] = {'values': data_values}
         return specification
 
 

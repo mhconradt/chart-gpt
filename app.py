@@ -13,7 +13,7 @@ from chart_gpt import chat_summarize_data
 from chart_gpt import get_connection
 
 # Question
-st.title("ChartGPT")
+st.title("ChartGPT 📈")
 
 question = st.text_input("What questions do you have about your data?")
 
@@ -82,7 +82,7 @@ if question:
 
     st.code(query, language="sql")
 
-    if st.checkbox("Run query?"):
+    if st.checkbox("Run query"):
         with st.spinner("Running query..."):
             result = run_query(question, query)
             st.dataframe(result, hide_index=True)
@@ -90,7 +90,7 @@ if question:
     if len(result):
         st.text(summarize_data(question, query, result))
 
-    if len(result) and st.checkbox("Visualize result?"):
+    if len(result) and st.checkbox("Visualize result 📊", value=True):
         try:
             vega_lite_specification = chart_generator.generate(question, query, result)
             st.vega_lite_chart(result, vega_lite_specification)
