@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "chart-gpt"
+version = "0.1.0"
+description = "An AI assistant for data analysis"
+authors = ["Max Conradt <mhconradt@protonmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+snowflake-connector-python = "3.0.0"
+pandas = "1.5.3"
+streamlit = "1.27.1"
+openai = "0.28.1"
+pydantic = "2.3.0"
+numpy = "1.25.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "7.4.2"
+ipython = "8.16.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
