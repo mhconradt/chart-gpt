@@ -1,6 +1,5 @@
 import glob
 import json
-import random
 from datetime import date
 from datetime import datetime
 from os import getenv
@@ -43,25 +42,9 @@ LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_colwidth", 16
 )
 
-DEFAULT_CONTEXT_ROW_LIMIT = 3
-DEFAULT_CONTEXT_COLUMN_LIMIT = 10
-DEFAULT_CONTEXT_TABLE_LIMIT = 5
-
-TABLE_SUMMARY_FORMAT = """
-Table: {table}
-Sample: {sample}
-"""
-
 SQL_GENERATION_MODEL = 'gpt-4'
 
-DEFAULT_SAMPLE_LIMIT = 10
-DEFAULT_TABLE_LIMIT = 100
-
-SYSTEM_PROMPT_MESSAGE = {
-    "role": "system",
-    "content": "You're a helpful assistant powering a BI tool. "
-               "Part of your work is generating structured output such as JSON or SQL."
-}
+DEFAULT_SAMPLE_LIMIT = 3
 
 SQL_EMBEDDING_MODEL = 'text-embedding-ada-002'
 CHART_EMBEDDING_MODEL = 'text-embedding-ada-002'
@@ -99,9 +82,9 @@ class DatabaseCrawler:
     def __init__(self, connection: SnowflakeConnection):
         self.connection = connection
 
-    def show_tables(self, limit: int = DEFAULT_TABLE_LIMIT) -> list[str]:
+    def show_tables(self) -> list[str]:
         cursor = self.connection.cursor(cursor_class=DictCursor)
-        return [table['name'] for table in cursor.execute("show tables;").fetchall()[:limit]]
+        return [table['name'] for table in cursor.execute("show tables;").fetchall()]
 
     def describe_table(self, table: str) -> DataFrame:
         cursor = self.connection.cursor(cursor_class=DictCursor)
@@ -119,8 +102,8 @@ class DatabaseCrawler:
         df = df[[c for c in df.columns if df[c].notna().any()]]
         return df
 
-    def get_table_descriptions(self, n: int = DEFAULT_TABLE_LIMIT) -> DataFrame:
-        table_names = self.show_tables(limit=n)
+    def get_table_descriptions(self) -> DataFrame:
+        table_names = self.show_tables()
         return pd.concat(
             [self.describe_table(table) for table in table_names],
             keys=table_names,
@@ -128,12 +111,8 @@ class DatabaseCrawler:
             axis='columns'
         )
 
-    def get_table_samples(
-            self,
-            n_rows: int = DEFAULT_SAMPLE_LIMIT,
-            n_tables: int = DEFAULT_TABLE_LIMIT
-    ) -> DataFrame:
-        table_names = self.show_tables(limit=n_tables)
+    def get_table_samples(self, n_rows: int = DEFAULT_SAMPLE_LIMIT) -> DataFrame:
+        table_names = self.show_tables()
         return pd.concat(
             [self.sample_table(table, limit=n_rows) for table in table_names],
             keys=table_names,
@@ -206,11 +185,9 @@ class SQLIndexData(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def subset(self, tables: list[str]) -> "SQLIndexData":
-        return SQLIndexData(
-            descriptions=self.descriptions[tables],
-            samples=self.samples[tables],
-        )
+    @property
+    def tables(self) -> list[str]:
+        return list(self.samples.columns.levels[0])
 
 
 def pd_vss_lookup(index: DataFrame, query: np.array, n: int) -> Series:  # ?
@@ -232,33 +209,15 @@ class SQLIndex(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def subset(self, tables: list[str]) -> "SQLIndex":
-        return SQLIndex(
-            data=self.data.subset(tables),
-            embeddings=self.embeddings.loc[tables]
-        )
-
     @classmethod
     def from_data(cls, data: SQLIndexData) -> "SQLIndex":
         # [table, column] -> [text]
         table_context = get_table_context(data)
-        embeddings = DataFrame([
-            item.embedding for item in openai.Embedding.create(
-                input=list(table_context),
-                engine=SQL_EMBEDDING_MODEL
-            ).data
-        ], index=table_context.index).rename(lambda i: f'dim_{i}', axis=1)
-        return cls(data=data, embeddings=embeddings, context=table_context)
+        return cls(data=data, context=table_context)
 
-    @classmethod
-    def get_text_sample(cls, data: SQLIndexData) -> DataFrame:
-        return data.samples.apply(
-            lambda s: s.rename_axis(s.name[-1]).to_markdown(index=False)).to_frame(name='text')
-
-    def top_tables(self, query: str, n: int = 5) -> list[str]:
-        all_tables = json.dumps(list(self.embeddings.index))
+    def top_tables(self, query: str) -> list[str]:
         completion = generate_completion(f"""
-        Tables: {all_tables}
+        Tables: {self.data.tables}
         Question: {query}
         JSON list of tables to query in order to answer question:
         """, model='gpt-4')
@@ -266,8 +225,8 @@ class SQLIndex(BaseModel):
         assert isinstance(tables, list)
         return tables
 
-    def top_context(self, query: str, n: int = 5) -> list[str]:
-        return self.context.loc[self.top_tables(query, n)].tolist()
+    def top_context(self, query: str) -> list[str]:
+        return self.context.loc[self.top_tables(query)].tolist()
 
 
 class SQLGenerator:
@@ -280,7 +239,6 @@ class SQLGenerator:
         n = 1
         while True:
             prompt = self.build_prompt(question, errors)
-            print(prompt)
             statement = self.generate(prompt)
             try:
                 self.validate(statement)
@@ -309,8 +267,8 @@ class SQLGenerator:
             """
         return system_prompt
 
-    def get_context(self, question: str, n_tables: int = DEFAULT_CONTEXT_TABLE_LIMIT) -> str:
-        context = self.index.top_context(question, n_tables)
+    def get_context(self, question: str) -> str:
+        context = self.index.top_context(question)
         summary = SUMMARY_DELIMITER.join(context)
         return summary
 
@@ -325,14 +283,6 @@ class SQLGenerator:
         if messages:
             return "Previous attempts:\n" + "\n".join(messages)
         return ""
-
-
-class ChartIndexData(BaseModel):
-    ...
-
-    @classmethod
-    def load(cls):
-        pass
 
 
 class ChartIndex(BaseModel):
@@ -374,7 +324,6 @@ class ChartIndex(BaseModel):
         Finds the most relevant chart specifications to the given question and data.
         :return: Series [chart_id] -> specification
         """
-        print(data.head(CHART_DEFAULT_CONTEXT_ROW_LIMIT).to_dict(orient="records"))
         embedding_query_string = json.dumps(
             {
                 "title": question,
@@ -389,15 +338,6 @@ class ChartIndex(BaseModel):
         )
         chart_ids = pd_vss_lookup(self.embeddings, embedding_query, n=3).index.tolist()
         return self.specifications.specification.loc[chart_ids]
-
-
-def get_bootstrap_questions() -> list[str]:
-    with open('data/TPCDS_SF10TCL-queries.json', 'r') as f:
-        return json.load(f)
-
-
-def get_random_questions():
-    return random.choices(get_bootstrap_questions(), k=10)
 
 
 def extract_json(text: str, start: str = '{', stop: str = '}') -> dict:
@@ -418,9 +358,9 @@ class ChartGenerator:
     def generate(self, question: str, query: str, result: DataFrame) -> dict:
         data_values = result.to_dict(orient='records')
         with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
-            # TODO: Rationalize the data model to avoid this round-tripping
             prompt = VEGA_LITE_CHART_PROMPT_FORMAT.format(
-                result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT], default=json_dumps_default),
+                result=json.dumps(data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT],
+                                  default=json_dumps_default),
                 question=question,
                 query=query,
                 examples=json.dumps(
@@ -428,11 +368,8 @@ class ChartGenerator:
                     default=json_dumps_default
                 )
             )
-        print(prompt)
         completion = generate_completion(prompt)
-        print(completion)
         specification = extract_json(completion)
-        # TODO: Validate using JSON Schema, feed errors back into the model.
         specification['data'] = {'values': data_values}
         return specification
 

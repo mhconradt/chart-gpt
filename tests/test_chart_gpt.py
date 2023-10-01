@@ -66,7 +66,7 @@ def gpt4_encoding() -> Encoding:
 
 def test_get_context(tpc_ds_questions, index, sql_generator, gpt4_encoding):
     for question in tpc_ds_questions[:5]:
-        context = sql_generator.get_context(question, n_tables=10)
+        context = sql_generator.get_context(question)
         tokens = gpt4_encoding.encode(context)
         n_tokens = len(tokens)
         assert n_tokens <= 8192
@@ -78,10 +78,10 @@ def test_generate(tpc_ds_questions, sql_generator):
 
 
 def test_crawler(database_crawler):
-    descriptions = database_crawler.get_table_descriptions(5)
+    descriptions = database_crawler.get_table_descriptions()
     assert isinstance(descriptions, DataFrame)
     assert descriptions.columns.names == ['table', 'column']
-    samples = database_crawler.get_table_samples(n_rows=5, n_tables=5)
+    samples = database_crawler.get_table_samples(n_rows=5)
     assert isinstance(samples, DataFrame)
     assert samples.columns.names == ['table', 'column']
 
