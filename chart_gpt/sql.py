@@ -5,7 +5,6 @@ import time
 import pandas as pd
 from pandas import DataFrame
 from pandas import Series
-from pydantic import BaseModel
 from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 
@@ -123,16 +122,6 @@ def postprocess_generated_sql(answer: str) -> str:
     start_index = answer.index(start) + len(start)
     stop_index = answer.index(stop, start_index)
     return answer[start_index:stop_index].strip()
-
-
-def chat_summarize_data(df: DataFrame, question: str, query: str) -> str:
-    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
-        return generate_completion(f"""
-            User's question: {question}.
-            Generated SQL query: {query}
-            SQL query result set: {df}
-            Answer to the user's question:
-        """, model='gpt-3.5-turbo')
 
 
 class SQLIndexData(ChartGptModel):

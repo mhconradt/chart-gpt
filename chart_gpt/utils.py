@@ -7,10 +7,13 @@ from os import getenv
 
 import numpy as np
 import openai
+import pandas as pd
 from pandas import DataFrame
 from pandas import Series
 from pydantic import BaseModel
 from snowflake.connector import connect
+
+from chart_gpt.sql import LLM_PANDAS_DISPLAY_OPTIONS
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -64,3 +67,13 @@ def pd_vss_lookup(index: DataFrame, query: np.array, n: int) -> Series:  # ?
     table_scores = similarity.sort_values(ascending=False) \
         .head(n)
     return table_scores
+
+
+def chat_summarize_data(result_set: DataFrame, question: str, query: str) -> str:
+    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+        return generate_completion(f"""
+            User's question: {question}.
+            Generated SQL query: {query}
+            SQL query result set: {result_set}
+            Answer to the user's question:
+        """, model='gpt-3.5-turbo')
