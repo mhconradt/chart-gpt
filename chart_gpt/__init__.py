@@ -2,16 +2,12 @@ import glob
 import json
 import random
 from os import getenv
-from typing import Literal
 
 import numpy as np
 import openai
 import pandas as pd
 from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
-from pandas import DataFrame
-from pandas import DataFrame
-from pandas import Series
 from pandas import Series
 from pydantic import BaseModel
 from snowflake.connector import DictCursor
@@ -61,7 +57,7 @@ DEFAULT_TABLE_LIMIT = 100
 
 SYSTEM_PROMPT_MESSAGE = {
     "role": "system",
-    "content": "You're a helpful assistant powering a BI tool. " \
+    "content": "You're a helpful assistant powering a BI tool. "
                "Part of your work is generating structured output such as JSON or SQL."
 }
 
@@ -84,7 +80,8 @@ def get_connection():
         password=getenv('SF_PASSWORD'),
         role=getenv('SF_ROLE'),
         database=getenv('SF_DATABASE'),
-        schema=getenv('SF_SCHEMA')
+        schema=getenv('SF_SCHEMA'),
+        # application='ChartGPT 0.0.0'
     )
 
 
@@ -155,8 +152,9 @@ class DatabaseCrawler:
     def get_foreign_keys(self) -> DataFrame:
         database, schema = self.connection.cursor().execute(
             "select current_database(), current_schema();").fetchone()
+        cursor = self.connection.cursor(cursor_class=DictCursor)
         return DataFrame(
-            self.connection.cursor(cursor_class=DictCursor).execute(f"show imported keys in schema {database}.{schema};").fetchall()
+            cursor.execute(f"show imported keys in schema {database}.{schema};").fetchall()
         ).drop_duplicates(['fk_table_name', 'fk_column_name']) \
             .set_index(['fk_table_name', 'fk_column_name']) \
             .rename_axis(['table', 'column']) \
@@ -236,11 +234,7 @@ class SQLIndex(BaseModel):
         )
 
     @classmethod
-    def from_data(
-            cls,
-            data: SQLIndexData,
-            strategy: Literal["sample", "semantic"] = "sample"
-    ) -> "SQLIndex":
+    def from_data(cls, data: SQLIndexData) -> "SQLIndex":
         # [table, column] -> [text]
         table_context = get_table_context(data)
         embeddings = DataFrame([
@@ -264,6 +258,7 @@ class SQLIndex(BaseModel):
         JSON list of tables to query in order to answer question:
         """, model='gpt-4')
         tables = extract_json(completion, start='[', stop=']')
+        assert isinstance(tables, list)
         return tables
 
     def top_context(self, query: str, n: int = 5) -> list[str]:
