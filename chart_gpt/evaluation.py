@@ -70,9 +70,11 @@ def main():
     index_data = crawler.get_index_data()
     index = SQLIndex.from_data(index_data)
     harness = EvaluationHarness(index)
-    print(harness.run(pd.read_json('data/TPC-DS-tables-columns.json')).to_markdown())
+    tpc_ds_metrics = harness.run(pd.read_json('data/TPC-DS-tables-columns.json'))
+    print(tpc_ds_metrics.to_markdown())
     print()
-    print(harness.run(pd.read_json('data/TPCDS-lite.json')).to_markdown())
+    tpc_ds_lite_metrics = harness.run(pd.read_json('data/TPCDS-lite.json'))
+    print(tpc_ds_lite_metrics.to_markdown())
     pass
 
 
