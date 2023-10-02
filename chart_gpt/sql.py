@@ -167,10 +167,9 @@ class SQLIndex(ChartGptModel):
         return self.context.loc[self.top_tables(query)].tolist()
 
 
-class SQLGenerator:
-    def __init__(self, connection: SnowflakeConnection, index: SQLIndex):
-        self.connection = connection
-        self.index = index
+class SQLGenerator(ChartGptModel):
+    connection: SnowflakeConnection
+    index: SQLIndex
 
     def generate_valid_query(self, question: str) -> str:
         logger.info("Generating query for question: %s")
