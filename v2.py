@@ -1,3 +1,5 @@
+import logging
+
 from datetime import timedelta
 
 import streamlit as st
@@ -8,13 +10,20 @@ from chart_gpt.utils import AssistantFrame
 from chart_gpt.utils import UserFrame
 
 
+logging.getLogger("chart_gpt.sql").setLevel("DEBUG")
+logging.getLogger("chart_gpt.charts").setLevel("DEBUG")
+logging.getLogger("chart_gpt.utils").setLevel("DEBUG")
+
+st.title("ChartGPT 📈")
+
+
 @st.cache_resource(ttl=timedelta(hours=24))
 def global_resources() -> GlobalResources:
     return GlobalResources.initialize()
 
 
 if 'state_actions' not in st.session_state:
-    st.session_state.state_actions = StateActions(resources=global_resources())
+    st.session_state.state_actions = StateActions(resources=global_resources().model_dump())
 
 if 'frames' not in st.session_state:
     st.session_state.frames = []
@@ -33,20 +42,23 @@ if prompt := st.chat_input("What questions do you have about your data?"):
     assistant_frame = AssistantFrame()
     st.session_state.frames.append(assistant_frame)
     st.session_state.state_actions.add_message(prompt, role="user")
-    assistant_message = st.chat_message("assistant")
-    try:
-        with st.spinner("Writing query"):
-            assistant_frame.query = st.session_state.state_actions.generate_query()
-            assistant_frame.render(assistant_message)
-        with st.spinner("Running query"):
-            assistant_frame.result_set = st.session_state.state_actions.run_query()
-            assistant_frame.render(assistant_message)
-        with st.spinner("Summarizing data"):
-            assistant_frame.summary = st.session_state.state_actions.summarize_data()
-            assistant_frame.render(assistant_message)
-        with st.spinner("Rendering chart"):
-            assistant_frame.chart = st.session_state.state_actions.visualize_data()
-            assistant_frame.render(assistant_message)
-    except (Exception,) as e:
-        assistant_frame.error = str(e)
-        assistant_frame.render(assistant_message)
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        try:
+            with st.spinner("Writing query"):
+                assistant_frame.query = st.session_state.state_actions.generate_query()
+                assistant_frame.render(placeholder)
+            with st.spinner("Running query"):
+                assistant_frame.result_set = st.session_state.state_actions.run_query()
+                assistant_frame.render(placeholder)
+            if len(assistant_frame.result_set):
+                with st.spinner("Summarizing data"):
+                    assistant_frame.summary = st.session_state.state_actions.summarize_data()
+                    assistant_frame.render(placeholder)
+            if len(assistant_frame.result_set) > 1:
+                with st.spinner("Rendering chart"):
+                    assistant_frame.chart = st.session_state.state_actions.visualize_data()
+                    assistant_frame.render(placeholder)
+        except (Exception,) as e:
+            assistant_frame.error = str(e)
+            assistant_frame.render(placeholder)

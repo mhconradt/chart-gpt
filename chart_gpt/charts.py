@@ -15,7 +15,6 @@ from chart_gpt.utils import generate_completion
 from chart_gpt.utils import json_dumps_default
 from chart_gpt.utils import pd_vss_lookup
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 CHART_CONTEXT_EXCLUDE_EXAMPLES = [
@@ -24,7 +23,7 @@ CHART_CONTEXT_EXCLUDE_EXAMPLES = [
     "interactive_dashboard_europe_pop",  # 3631
     "layer_line_window"  # 3520
 ]
-CHART_DEFAULT_CONTEXT_ROW_LIMIT = 10
+CHART_DEFAULT_CONTEXT_ROW_LIMIT = 5
 VEGA_LITE_CHART_PROMPT_FORMAT = """
 Examples:
 {examples}

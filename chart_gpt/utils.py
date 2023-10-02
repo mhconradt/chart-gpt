@@ -1,6 +1,6 @@
 import json
 import logging
-import sys
+from _decimal import Decimal
 from abc import abstractmethod
 from datetime import date
 from datetime import datetime
@@ -9,16 +9,13 @@ from typing import Optional
 
 import numpy as np
 import openai
-import pandas as pd
 from pandas import DataFrame
 from pandas import Series
 from pydantic import BaseModel
 from snowflake.connector import connect
+import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from chart_gpt.sql import LLM_PANDAS_DISPLAY_OPTIONS
-
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -41,23 +38,24 @@ class AssistantFrame(Frame):
     error: Optional[str] = None
 
     def render(self, canvas: DeltaGenerator):
-        if self.query is not None:
-            canvas.code(self.query, language="sql")
-        if self.result_set is not None:
-            canvas.dataframe(self.result_set)
-        if self.summary is not None:
-            canvas.text(self.summary)
-        if self.chart is not None:
-            canvas.vega_lite_chart(self.result_set, self.chart)
-        if self.error is not None:
-            canvas.error(self.error)
+        with canvas.container():
+            if self.query is not None:
+                st.code(self.query, language="sql")
+            if self.result_set is not None:
+                st.dataframe(self.result_set, hide_index=True)
+            if self.summary is not None:
+                st.text(self.summary)
+            if self.chart is not None:
+                st.vega_lite_chart(self.result_set, self.chart)
+            if self.error is not None:
+                st.error(self.error)
 
 
 class UserFrame(Frame):
     prompt: str
 
     def render(self, canvas: DeltaGenerator):
-        canvas.text(self.message)
+        canvas.text(self.prompt)
 
 
 def get_connection():
@@ -80,7 +78,7 @@ def generate_completion(prompt: str, model: str = 'gpt-4') -> str:
             {"role": "system", "content": prompt}
         ]
     ).choices[0].message.content
-    logger.debug("Completion %s", prompt)
+    logger.debug("Completion %s", response)
     return response
 
 
@@ -92,6 +90,8 @@ def extract_json(text: str, start: str = '{', stop: str = '}') -> dict:
 def json_dumps_default(o):
     if isinstance(o, (date, datetime)):
         return o.isoformat()
+    elif isinstance(o, Decimal):
+        return float(o)
     raise TypeError(f"Object {o} not JSON serializable")
 
 
@@ -103,13 +103,3 @@ def pd_vss_lookup(index: DataFrame, query: np.array, n: int) -> Series:  # ?
     table_scores = similarity.sort_values(ascending=False) \
         .head(n)
     return table_scores
-
-
-def chat_summarize_data(result_set: DataFrame, question: str, query: str) -> str:
-    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
-        return generate_completion(f"""
-            User's question: {question}.
-            Generated SQL query: {query}
-            SQL query result set: {result_set}
-            Answer to the user's question:
-        """, model='gpt-3.5-turbo')

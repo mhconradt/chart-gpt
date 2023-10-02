@@ -4,6 +4,7 @@ import time
 
 import pandas as pd
 from pandas import DataFrame
+from pandas import DataFrame
 from pandas import Series
 from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
@@ -11,8 +12,8 @@ from snowflake.connector import SnowflakeConnection
 from chart_gpt.utils import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
+from chart_gpt.utils import generate_completion
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # These have really high token counts
@@ -144,7 +145,6 @@ class SQLIndexData(ChartGptModel):
 class SQLIndex(ChartGptModel):
     data: SQLIndexData
     # (table) -> dim_0, dim_1, ..., dim_n
-    embeddings: DataFrame
     context: Series
 
     @classmethod
@@ -172,7 +172,7 @@ class SQLGenerator(ChartGptModel):
     index: SQLIndex
 
     def generate_valid_query(self, question: str) -> str:
-        logger.info("Generating query for question: %s")
+        logger.info("Generating query for question: %s", question)
         errors = []
         n = 1
         while True:
@@ -254,3 +254,13 @@ def get_select_x(sample: DataFrame, n_rows: int = 3) -> str:
             "*/"
         ]
         return "\n".join(parts)
+
+
+def chat_summarize_data(result_set: DataFrame, question: str, query: str) -> str:
+    with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
+        return generate_completion(f"""
+            User's question: {question}.
+            Generated SQL query: {query}
+            SQL query result set: {result_set}
+            Summarize how this dataset answers the user's question:
+        """, model='gpt-3.5-turbo')

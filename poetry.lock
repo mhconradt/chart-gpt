@@ -782,11 +782,11 @@ tests = ["pytest"]
 
 [[package]]
 name = "pyarrow"
-version = "13.0.0"
+version = "10.0.1"
 description = "Python library for Apache Arrow"
 category = "main"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.7"
 
 [package.dependencies]
 numpy = ">=1.16.6"
@@ -1340,7 +1340,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-ena
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "7706bdb988ad0a50d538842bd4a43ae4f634d51e3545d378e16ab1b0c65bf698"
+content-hash = "fd692e7d0452fbf28a2cfec38c86d4b1727dd157fe3287ed5baf2b21323daf28"
 
 [metadata.files]
 aiohttp = []

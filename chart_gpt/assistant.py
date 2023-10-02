@@ -9,7 +9,7 @@ from chart_gpt import DatabaseCrawler
 from chart_gpt import get_connection
 from chart_gpt.charts import ChartGenerator
 from chart_gpt.sql import SQLGenerator
-from chart_gpt.utils import chat_summarize_data
+from chart_gpt import chat_summarize_data
 from chart_gpt.utils import ChartGptModel
 
 EmptyListField = Field(default_factory=list)
@@ -44,7 +44,7 @@ class GlobalResources(ChartGptModel):
         crawler = DatabaseCrawler(connection=connection)
         index = crawler.get_index()
         sql_generator = SQLGenerator(connection=connection, index=index)
-        chart_index = ChartIndex()
+        chart_index = ChartIndex.create()
         chart_generator = ChartGenerator(index=chart_index)
         return GlobalResources(
             connection=connection,
