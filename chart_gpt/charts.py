@@ -1,7 +1,7 @@
 import glob
 import json
 import logging
-import sys
+from pathlib import Path
 
 import numpy as np
 import openai
@@ -48,12 +48,12 @@ class ChartIndex(ChartGptModel):
 
     @classmethod
     def create(cls) -> "ChartIndex":
-        vl_example_files = glob.glob('data/vega-lite/examples/*.vl.json')
+        vl_example_files = glob.glob('data/vega-lite/examples/*.vl.json',
+                                     root_dir=Path(__file__).parent)
         vl_example_names = [
             example.removeprefix('data/vega-lite/examples/').removesuffix('.vl.json')
             for example in vl_example_files
         ]
-        # vl_example_specs = [json.load(open(example, 'r')) for example in vl_example_files]
         vl_example_specs_json = [open(example, 'r').read() for example in vl_example_files]
         response = openai.Embedding.create(
             input=vl_example_specs_json,
