@@ -1,9 +1,11 @@
 import json
 import logging
 import sys
+from abc import abstractmethod
 from datetime import date
 from datetime import datetime
 from os import getenv
+from typing import Optional
 
 import numpy as np
 import openai
@@ -12,6 +14,7 @@ from pandas import DataFrame
 from pandas import Series
 from pydantic import BaseModel
 from snowflake.connector import connect
+from streamlit.delta_generator import DeltaGenerator
 
 from chart_gpt.sql import LLM_PANDAS_DISPLAY_OPTIONS
 
@@ -22,6 +25,39 @@ logger = logging.getLogger(__name__)
 class ChartGptModel(BaseModel):
     class Config:
         arbitrary_types_allowed = True
+
+
+class Frame(ChartGptModel):
+    @abstractmethod
+    def render(self, canvas: DeltaGenerator):
+        pass
+
+
+class AssistantFrame(Frame):
+    query: Optional[str] = None
+    result_set: Optional[DataFrame] = None
+    summary: Optional[str] = None
+    chart: Optional[dict] = None
+    error: Optional[str] = None
+
+    def render(self, canvas: DeltaGenerator):
+        if self.query is not None:
+            canvas.code(self.query, language="sql")
+        if self.result_set is not None:
+            canvas.dataframe(self.result_set)
+        if self.summary is not None:
+            canvas.text(self.summary)
+        if self.chart is not None:
+            canvas.vega_lite_chart(self.result_set, self.chart)
+        if self.error is not None:
+            canvas.error(self.error)
+
+
+class UserFrame(Frame):
+    prompt: str
+
+    def render(self, canvas: DeltaGenerator):
+        canvas.text(self.message)
 
 
 def get_connection():
