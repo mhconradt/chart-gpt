@@ -9,7 +9,7 @@ python = "^3.10"
 snowflake-connector-python = "3.0.0"
 pandas = "1.5.3"
 streamlit = "1.27.1"
-openai = "0.28.1"
+openai = {extras = ["embeddings"], version = "^0.28.1"}
 pydantic = "2.3.0"
 numpy = "1.25.0"
 
