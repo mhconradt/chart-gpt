@@ -1,10 +1,13 @@
 import json
 import logging
+import os
 from _decimal import Decimal
 from abc import abstractmethod
 from datetime import date
 from datetime import datetime
 from os import getenv
+from typing import Any
+from typing import Mapping
 from typing import Optional
 
 import numpy as np
@@ -12,6 +15,7 @@ import openai
 from pandas import DataFrame
 from pandas import Series
 from pydantic import BaseModel
+from snowflake.connector import SnowflakeConnection
 from snowflake.connector import connect
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
@@ -58,15 +62,14 @@ class UserFrame(Frame):
         canvas.text(self.prompt)
 
 
-def get_connection():
+def get_connection(secrets: Mapping[str, Any] = os.environ) -> SnowflakeConnection:
     return connect(
-        account=getenv('SF_ACCOUNT'),
-        user=getenv('SF_USER'),
-        password=getenv('SF_PASSWORD'),
-        role=getenv('SF_ROLE'),
-        database=getenv('SF_DATABASE'),
-        schema=getenv('SF_SCHEMA'),
-        # application='ChartGPT 0.0.0'
+        account=secrets.get('SF_ACCOUNT'),
+        user=secrets.get('SF_USER'),
+        password=secrets.get('SF_PASSWORD'),
+        role=secrets.get('SF_ROLE'),
+        database=secrets.get('SF_DATABASE'),
+        schema=secrets.get('SF_SCHEMA'),
     )
 
 

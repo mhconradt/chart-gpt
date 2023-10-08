@@ -48,13 +48,14 @@ class ChartIndex(ChartGptModel):
 
     @classmethod
     def create(cls) -> "ChartIndex":
+        root_dir = Path(__file__).parent
         vl_example_files = glob.glob('data/vega-lite/examples/*.vl.json',
-                                     root_dir=Path(__file__).parent)
+                                     root_dir=root_dir)
         vl_example_names = [
             example.removeprefix('data/vega-lite/examples/').removesuffix('.vl.json')
             for example in vl_example_files
         ]
-        vl_example_specs_json = [open(example, 'r').read() for example in vl_example_files]
+        vl_example_specs_json = [open(root_dir / example, 'r').read() for example in vl_example_files]
         response = openai.Embedding.create(
             input=vl_example_specs_json,
             engine=CHART_EMBEDDING_MODEL

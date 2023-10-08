@@ -19,7 +19,7 @@ st.title("ChartGPT 📈")
 
 @st.cache_resource(ttl=timedelta(hours=24))
 def global_resources() -> GlobalResources:
-    return GlobalResources.initialize()
+    return GlobalResources.initialize(secrets=st.secrets)
 
 
 if 'state_actions' not in st.session_state:

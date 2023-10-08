@@ -1,5 +1,9 @@
+import os
+from typing import Any
 from typing import Literal
+from typing import Mapping
 
+import openai
 from pandas import DataFrame
 from pydantic import Field
 from snowflake.connector import SnowflakeConnection
@@ -39,8 +43,10 @@ class GlobalResources(ChartGptModel):
     chart_generator: ChartGenerator
 
     @classmethod
-    def initialize(cls) -> "GlobalResources":
-        connection = get_connection()
+    def initialize(cls, secrets: Mapping[str, Any] = os.environ) -> "GlobalResources":
+        connection = get_connection(secrets)
+        openai.api_key = secrets.get('OPENAI_API_KEY')
+        openai.organization = secrets.get('OPENAI_ORGANIZATION')
         crawler = DatabaseCrawler(connection=connection)
         index = crawler.get_index()
         sql_generator = SQLGenerator(connection=connection, index=index)
