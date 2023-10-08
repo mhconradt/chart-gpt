@@ -13,6 +13,7 @@ openai = {extras = ["embeddings"], version = "^0.28.1"}
 pydantic = "2.3.0"
 numpy = "1.25.0"
 pyarrow = "^10.0.0"
+tiktoken = "^0.5.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "7.4.2"

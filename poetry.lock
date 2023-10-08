@@ -952,6 +952,14 @@ attrs = ">=22.2.0"
 rpds-py = ">=0.7.0"
 
 [[package]]
+name = "regex"
+version = "2023.10.3"
+description = "Alternative regular expression module, to replace re."
+category = "main"
+optional = false
+python-versions = ">=3.7"
+
+[[package]]
 name = "requests"
 version = "2.31.0"
 description = "Python HTTP for Humans."
@@ -1164,6 +1172,21 @@ optional = false
 python-versions = ">=3.8"
 
 [[package]]
+name = "tiktoken"
+version = "0.5.1"
+description = "tiktoken is a fast BPE tokeniser for use with OpenAI's models"
+category = "main"
+optional = false
+python-versions = ">=3.8"
+
+[package.dependencies]
+regex = ">=2022.1.18"
+requests = ">=2.26.0"
+
+[package.extras]
+blobfile = ["blobfile (>=2)"]
+
+[[package]]
 name = "toml"
 version = "0.10.2"
 description = "Python Library for Tom's Obvious, Minimal Language"
@@ -1340,7 +1363,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-ena
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "fd692e7d0452fbf28a2cfec38c86d4b1727dd157fe3287ed5baf2b21323daf28"
+content-hash = "a12091dedc34285332dd6a0c6b1da8e0da71afe744a24d4879f44637a928b57b"
 
 [metadata.files]
 aiohttp = []
@@ -1419,6 +1442,7 @@ pytest = []
 python-dateutil = []
 pytz = []
 referencing = []
+regex = []
 requests = []
 rich = []
 rpds-py = []
@@ -1432,6 +1456,7 @@ stack-data = []
 streamlit = []
 tenacity = []
 threadpoolctl = []
+tiktoken = []
 toml = []
 tomli = []
 toolz = []
