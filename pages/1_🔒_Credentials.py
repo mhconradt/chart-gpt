@@ -3,7 +3,11 @@ import streamlit as st
 if 'secrets' not in st.session_state:
     st.session_state.secrets = {}
 
+st.title("Credentials")
+
 with st.form('Credentials'):
+    st.caption('ChartGPT does not persistently store your credentials')
+
     user = st.text_input(label='User')
 
     password = st.text_input(label='Password', type='password')
