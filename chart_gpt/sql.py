@@ -2,6 +2,7 @@ import logging
 import time
 
 import pandas as pd
+import tiktoken
 from pandas import DataFrame
 from pandas import Series
 from snowflake.connector import DictCursor
@@ -10,6 +11,8 @@ from snowflake.connector import SnowflakeConnection
 from chart_gpt.schemas import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
+
+SQL_TOKEN_LIMIT = 4096
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,7 @@ LLM_PANDAS_DISPLAY_OPTIONS = (
 )
 
 SQL_GENERATION_MODEL = 'gpt-4'
+SQL_ENCODING = tiktoken.encoding_for_model(SQL_GENERATION_MODEL)
 
 DEFAULT_SAMPLE_LIMIT = 3
 
@@ -163,7 +167,10 @@ class SQLIndex(ChartGptModel):
         return tables
 
     def top_context(self, query: str) -> list[str]:
-        return self.context.loc[self.top_tables(query)].tolist()
+        context = self.context.loc[self.top_tables(query)]
+        n_tokens = context.map(lambda text: len(SQL_ENCODING.encode(text)))
+        cum_token_count = n_tokens.cumsum() < SQL_TOKEN_LIMIT
+        return context[cum_token_count].tolist()
 
 
 class SQLGenerator(ChartGptModel):
@@ -191,7 +198,7 @@ class SQLGenerator(ChartGptModel):
                 return statement
 
     def generate(self, prompt):
-        answer = generate_completion(prompt)
+        answer = generate_completion(prompt, model=SQL_GENERATION_MODEL)
         statement = postprocess_generated_sql(answer)
         return statement
 
