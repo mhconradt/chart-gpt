@@ -76,11 +76,10 @@ if prompt := st.chat_input("What questions do you have about your data?"):
             with st.spinner("Running query"):
                 assistant_frame.result_set = st.session_state.state_actions.run_query()
                 assistant_frame.render(placeholder)
-            if len(assistant_frame.result_set):
+            if len(assistant_frame.result_set) > 1:
                 with st.spinner("Summarizing data"):
                     assistant_frame.summary = st.session_state.state_actions.summarize_data()
                     assistant_frame.render(placeholder)
-            if len(assistant_frame.result_set) > 1:
                 with st.spinner("Rendering chart"):
                     assistant_frame.chart = st.session_state.state_actions.visualize_data()
                     assistant_frame.render(placeholder)
