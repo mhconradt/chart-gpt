@@ -38,10 +38,14 @@ salt = hash(json.dumps(st.session_state.secrets))
 @st.cache_resource(ttl=timedelta(hours=4), show_spinner=False)
 def get_state_actions(salt):
     with st.spinner("Initializing"):
-        return StateActions(resources=GlobalResources.initialize(secrets={
-            **st.secrets,
-            **st.session_state.secrets
-        }).model_dump())
+        try:
+            secrets = {**st.secrets, **st.session_state.secrets}
+            global_resources = GlobalResources.initialize(secrets=secrets)
+            actions = StateActions(resources=global_resources.model_dump())
+            st.success(f"Initialized database {global_resources.connection.database}")
+            return actions
+        except (Exception,) as e:
+            st.error(e)
 
 
 st.session_state.state_actions = get_state_actions(salt)
