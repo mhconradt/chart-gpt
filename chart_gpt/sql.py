@@ -107,6 +107,8 @@ class DatabaseCrawler(ChartGptModel):
         cursor = self.connection.cursor(cursor_class=DictCursor)
         query = f"show imported keys in schema {database}.{schema};"
         foreign_keys = DataFrame(cursor.execute(query).fetchall())
+        if not len(foreign_keys):
+            foreign_keys = DataFrame(data=[], columns=['fk_table_name', 'fk_column_name', 'pk_table_name', 'pk_column_name'])
         deduplicated = foreign_keys.drop_duplicates(['fk_table_name', 'fk_column_name'])
         indexed = deduplicated.set_index(['fk_table_name', 'fk_column_name'])  # type: ignore
         renamed = indexed.rename_axis(['table', 'column'])
