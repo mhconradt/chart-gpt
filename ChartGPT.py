@@ -10,9 +10,13 @@ from chart_gpt.assistant import StateActions
 from chart_gpt.utils import AssistantFrame
 from chart_gpt.utils import UserFrame
 
-logging.getLogger("chart_gpt.sql").setLevel("DEBUG")
-logging.getLogger("chart_gpt.charts").setLevel("DEBUG")
-logging.getLogger("chart_gpt.utils").setLevel("DEBUG")
+log_level = st.secrets.get("LOG_LEVEL", "DEBUG")
+
+logging.getLogger("chart_gpt.sql").setLevel(log_level)
+logging.getLogger("chart_gpt.charts").setLevel(log_level)
+logging.getLogger("chart_gpt.utils").setLevel(log_level)
+logger = logging.getLogger(__name__)
+logger.setLevel(log_level)
 
 st.set_page_config(
     page_title="ChartGPT",
@@ -86,3 +90,4 @@ if prompt := st.chat_input("What questions do you have about your data?"):
         except (Exception,) as e:
             assistant_frame.error = str(e)
             assistant_frame.render(placeholder)
+            logger.exception("Error while answering question %s", e)
