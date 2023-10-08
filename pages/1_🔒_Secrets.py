@@ -32,3 +32,5 @@ with st.form('Credentials'):
             "SF_WAREHOUSE": warehouse,
         }
         st.session_state.secrets = {k: v for k, v in form_data.items() if v}
+
+        st.success("Credentials saved")
