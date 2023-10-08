@@ -12,11 +12,11 @@ from snowflake.connector import SnowflakeConnection
 
 from chart_gpt import ChartIndex
 from chart_gpt import DatabaseCrawler
+from chart_gpt import chat_summarize_data
 from chart_gpt import get_connection
 from chart_gpt.charts import ChartGenerator
+from chart_gpt.schemas import ChartGptModel
 from chart_gpt.sql import SQLGenerator
-from chart_gpt import chat_summarize_data
-from chart_gpt.utils import ChartGptModel
 
 EmptyListField = Field(default_factory=list)
 

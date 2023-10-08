@@ -9,7 +9,7 @@ from openai.embeddings_utils import get_embedding
 from pandas import DataFrame
 from pandas import Series
 
-from chart_gpt.utils import ChartGptModel
+from chart_gpt.schemas import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
 from chart_gpt.utils import json_dumps_default

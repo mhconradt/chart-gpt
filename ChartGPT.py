@@ -7,8 +7,8 @@ import streamlit as st
 
 from chart_gpt.assistant import GlobalResources
 from chart_gpt.assistant import StateActions
-from chart_gpt.utils import AssistantFrame
-from chart_gpt.utils import UserFrame
+from chart_gpt.frame import AssistantFrame
+from chart_gpt.frame import UserFrame
 
 log_level = st.secrets.get("LOG_LEVEL", "DEBUG")
 

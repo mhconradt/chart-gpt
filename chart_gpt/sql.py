@@ -1,22 +1,17 @@
 import logging
-import sys
 import time
 
 import pandas as pd
-from pandas import DataFrame
 from pandas import DataFrame
 from pandas import Series
 from snowflake.connector import DictCursor
 from snowflake.connector import SnowflakeConnection
 
-from chart_gpt.utils import ChartGptModel
+from chart_gpt.schemas import ChartGptModel
 from chart_gpt.utils import extract_json
-from chart_gpt.utils import generate_completion
 from chart_gpt.utils import generate_completion
 
 logger = logging.getLogger(__name__)
-
-# These have really high token counts
 
 LLM_PANDAS_DISPLAY_OPTIONS = (
     "display.max_columns", 100,
@@ -108,7 +103,9 @@ class DatabaseCrawler(ChartGptModel):
         query = f"show imported keys in schema {database}.{schema};"
         foreign_keys = DataFrame(cursor.execute(query).fetchall())
         if not len(foreign_keys):
-            foreign_keys = DataFrame(data=[], columns=['fk_table_name', 'fk_column_name', 'pk_table_name', 'pk_column_name'])
+            foreign_keys = DataFrame(data=[],
+                                     columns=['fk_table_name', 'fk_column_name', 'pk_table_name',
+                                              'pk_column_name'])
         deduplicated = foreign_keys.drop_duplicates(['fk_table_name', 'fk_column_name'])
         indexed = deduplicated.set_index(['fk_table_name', 'fk_column_name'])  # type: ignore
         renamed = indexed.rename_axis(['table', 'column'])
