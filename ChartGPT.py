@@ -21,6 +21,14 @@ st.set_page_config(
 
 st.title("ChartGPT 📈")
 
+st.markdown("""
+    Welcome to ChartGPT 🎉. 
+    
+    You can try it out using the TPCDS dataset or configure your own database using the Secrets tab.
+    
+    Enjoy! 
+""")
+
 if 'secrets' not in st.session_state:
     st.session_state.secrets = {}
 
