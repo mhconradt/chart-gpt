@@ -1,3 +1,4 @@
+import json
 import logging
 
 from datetime import timedelta
@@ -9,21 +10,33 @@ from chart_gpt.assistant import StateActions
 from chart_gpt.utils import AssistantFrame
 from chart_gpt.utils import UserFrame
 
-
 logging.getLogger("chart_gpt.sql").setLevel("DEBUG")
 logging.getLogger("chart_gpt.charts").setLevel("DEBUG")
 logging.getLogger("chart_gpt.utils").setLevel("DEBUG")
 
+st.set_page_config(
+    page_title="ChartGPT",
+    page_icon="📈"
+)
+
 st.title("ChartGPT 📈")
 
+if 'secrets' not in st.session_state:
+    st.session_state.secrets = {}
 
-@st.cache_resource(ttl=timedelta(hours=24))
-def global_resources() -> GlobalResources:
-    return GlobalResources.initialize(secrets=st.secrets)
+salt = hash(json.dumps(st.session_state.secrets))
 
 
-if 'state_actions' not in st.session_state:
-    st.session_state.state_actions = StateActions(resources=global_resources().model_dump())
+@st.cache_resource(ttl=timedelta(hours=4), show_spinner=False)
+def get_state_actions(salt):
+    with st.spinner("Initializing"):
+        return StateActions(resources=GlobalResources.initialize(secrets={
+            **st.secrets,
+            **st.session_state.secrets
+        }).model_dump())
+
+
+st.session_state.state_actions = get_state_actions(salt)
 
 if 'frames' not in st.session_state:
     st.session_state.frames = []
