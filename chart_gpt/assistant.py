@@ -6,6 +6,8 @@ from typing import Mapping
 import openai
 from pandas import DataFrame
 from pydantic import Field
+from snowflake.connector import DictCursor
+from snowflake.connector import NotSupportedError
 from snowflake.connector import SnowflakeConnection
 
 from chart_gpt import ChartIndex
@@ -84,7 +86,11 @@ class StateActions(ChartGptModel):
         except IndexError:
             raise UnsupportedAction()
         try:
-            result_set = self.resources.connection.cursor().execute(last_query).fetch_pandas_all()
+            cursor = self.resources.connection.cursor(cursor_class=DictCursor).execute(last_query)
+            try:
+                result_set = cursor.fetch_pandas_all()
+            except NotSupportedError:
+                result_set = DataFrame(cursor.fetchall())
             self.state.result_sets.append(result_set)
             return result_set
         except (Exception,) as e:
