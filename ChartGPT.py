@@ -27,7 +27,7 @@ st.markdown("""
     Welcome to ChartGPT 🎉 
 
     You can try it out using the TPCDS dataset or configure your own database using the Credentials 
-    tab. 
+    tab. Currently the only supported database is Snowflake.
 
     If you're not sure what to ask, you can start with "Show me tables in the database." 
 
