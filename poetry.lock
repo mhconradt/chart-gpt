@@ -940,6 +940,14 @@ optional = false
 python-versions = "*"
 
 [[package]]
+name = "pyyaml"
+version = "6.0.1"
+description = "YAML parser and emitter for Python"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
 name = "referencing"
 version = "0.30.2"
 description = "JSON Referencing + Python"
@@ -1363,7 +1371,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-ena
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "a12091dedc34285332dd6a0c6b1da8e0da71afe744a24d4879f44637a928b57b"
+content-hash = "95dcafa4b9841db61b6e0fb00ad110d193df762adc125fdd022167436d2a4b09"
 
 [metadata.files]
 aiohttp = []
@@ -1441,6 +1449,7 @@ pyparsing = []
 pytest = []
 python-dateutil = []
 pytz = []
+pyyaml = []
 referencing = []
 regex = []
 requests = []
