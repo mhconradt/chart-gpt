@@ -50,7 +50,7 @@ def get_state_actions(salt):
             secrets = {**st.secrets, **st.session_state.secrets}
             global_resources = GlobalResources.initialize(secrets=secrets)
             actions = StateActions(resources=global_resources.model_dump())
-            st.success(f"Initialized database {global_resources.connection.database}")
+            st.success(f"Initialized schema {global_resources.connection.schema} in database {global_resources.connection.database}")
             return actions
         except (Exception,) as e:
             st.error(e)
