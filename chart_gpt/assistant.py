@@ -1,7 +1,11 @@
+import functools
+import inspect
 import os
 from typing import Any
 from typing import Literal
 from typing import Mapping
+from typing import Optional
+from uuid import uuid4
 
 import openai
 from pandas import DataFrame
@@ -25,7 +29,7 @@ class SessionState(ChartGptModel):
     # A materialized view of all chat messages
     messages: list[dict] = EmptyListField
     queries: list[str] = EmptyListField
-    result_sets: list[DataFrame] = EmptyListField
+    result_sets: dict[str, DataFrame] = Field(default_factory=dict)
     execution_errors: list[str] = EmptyListField
     summaries: list[str] = EmptyListField
     charts: list[dict] = EmptyListField
@@ -65,59 +69,188 @@ class UnsupportedAction(Exception):
     pass
 
 
+class GenerateQueryCommand(ChartGptModel):
+    prompt: str = Field(description="A question / command containing any user hints or preferences on how to write the query. The LLM will do the rest.")
+
+
+class GenerateQueryOutput(ChartGptModel):
+    query: str = Field(description="A valid SQL query to run against the database.")
+
+
+class RunQueryCommand(ChartGptModel):
+    query: str = Field(description="A valid SQL query to run against the database.")
+
+
+class RunQueryOutput(ChartGptModel):
+    result_set_id: str = Field(description="A UUID that can be used in summarize_result_set and visualize_result_set.")
+    columns: list[str] = Field(description="Columns present in the result set.")
+    row_count: int = Field(description="Number of rows in the result set.")
+
+
+class SummarizeResultSetCommand(ChartGptModel):
+    prompt: str = Field(description="A question / command to answer / follow from the result set.")
+    result_set_id: str = Field(description="A result set ID previously returned from run_query.")
+
+
+class SummarizeResultSetOutput(ChartGptModel):
+    summary: str = Field(description="A summary of how the result set answers the question / command.")
+
+
+class VisualizeResultSet(ChartGptModel):
+    prompt: str = Field(description="A question to be answered visually, or a command to be followed when generating the chart.")
+    result_set_id: str = Field(description="A result set ID previously returned from run_query.")
+
+
+class VisualizeResultSetOutput(ChartGptModel):
+    vega_lite_specification: dict = Field(description="A Vega Lite specification.")
+
+
+def get_openai_function(f):
+    command_type = inspect.get_annotations(f)['command']
+    function_info = {
+        'name': f.__name__,
+        'description': inspect.getdoc(f),
+        'parameters': command_type.model_json_schema()
+    }
+    return function_info
+
+
 class StateActions(ChartGptModel):
     state: SessionState = Field(default_factory=SessionState)
     resources: GlobalResources
 
-    def add_message(self, content: str, role: Literal["user", "assistant"]):
-        self.state.messages.append({"role": role, "content": content})
+    def add_message(self, message: dict):
+        self.state.messages.append(message)
 
-    def generate_query(self) -> str:
+    def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
+        """
+        Uses an LLM to write a SQL query to answer a question / follow command.
+        """
         try:
-            query = self.resources.sql_generator.generate_valid_query(self.state.last_user_message)
+            query = self.resources.sql_generator.generate_valid_query(command.prompt)
             self.state.queries.append(query)
-            return query
+            return GenerateQueryOutput(query=query)
         except LookupError:
             raise UnsupportedAction()
 
-    def run_query(self) -> DataFrame:
+    def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
+        """
+        Runs a SQL query and stores the result set for question answering and visualization.
+        """
         try:
-            last_query = self.state.queries[-1]
-        except IndexError:
-            raise UnsupportedAction()
-        try:
-            cursor = self.resources.connection.cursor(cursor_class=DictCursor).execute(last_query)
+            cursor = self.resources.connection.cursor(cursor_class=DictCursor)
+            cursor.execute(command.query)
             try:
                 result_set = cursor.fetch_pandas_all()
             except NotSupportedError:
                 result_set = DataFrame(cursor.fetchall())
-            self.state.result_sets.append(result_set)
-            return result_set
+            result_set_id = str(uuid4())
+            self.state.result_sets[result_set_id] = result_set
+            return RunQueryOutput(result_set_id=result_set_id,
+                                  columns=list(result_set.columns),
+                                  row_count=len(result_set))
         except (Exception,) as e:
             # Not sure about this.
             self.state.execution_errors.append(e.args[0])
             raise e
 
-    def summarize_data(self) -> str:
+    def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
+        """
+        Uses an LLM to summarize information in the result set relevant to a prompt.
+        """
         try:
-            summary = chat_summarize_data(
-                result_set=self.state.result_sets[-1],
-                question=self.state.last_user_message,
-                query=self.state.queries[-1]
-            )
+            summary = chat_summarize_data(result_set=self.state.result_sets[command.result_set_id],
+                                          question=command.prompt)
             self.state.summaries.append(summary)
-            return summary
-        except IndexError:
+            return SummarizeResultSetOutput(summary=summary)
+        except KeyError:
             raise UnsupportedAction()
 
-    def visualize_data(self) -> dict:
+    def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
+        """
+        Uses an LLM to create a Vega Lite specification to help answer the question / follow a command.
+        """
         try:
             chart = self.resources.chart_generator.generate(
-                question=self.state.last_user_message,
-                query=self.state.queries[-1],
-                result=self.state.result_sets[-1],
+                question=command.prompt,
+                result_set=self.state.result_sets[command.result_set_id]
             )
             self.state.charts.append(chart)
-            return chart
+            return VisualizeResultSetOutput(vega_lite_specification=chart)
         except (LookupError, IndexError):
             raise UnsupportedAction()
+
+
+class StreamlitStateActions(StateActions):
+    def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
+        return super().generate_query(command)
+
+    def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
+        return super().run_query(command)
+
+    def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
+        return super().summarize_result_set(command)
+
+    def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
+        return super().visualize_result_set(command)
+
+
+class Interpreter(ChartGptModel):
+    actions: StateActions
+
+    def run(self) -> str:
+        functions = [self.actions.generate_query, self.actions.run_query,
+                     self.actions.summarize_result_set, self.actions.visualize_result_set]
+        function_lut = {
+            f.__name__: f
+            for f in functions
+        }
+        openai_functions = [get_openai_function(f) for f in functions]
+        while True:
+            response = openai.ChatCompletion.create(
+                model='gpt-4',
+                messages=self.actions.state.messages,
+                functions=openai_functions,
+                temperature=0.0,
+            ).choices[0]
+            self.actions.add_message(response.message)
+            if response.finish_reason == "function_call":
+                function_call = response.message.function_call
+                fn = function_lut[function_call.name]
+                command_type = inspect.get_annotations(fn)['command']
+                parsed_args = command_type.parse_raw(function_call.arguments)
+                out = fn(parsed_args)
+                self.actions.add_message({
+                    "role": "function",
+                    "name": function_call.name,
+                    "content": out.json()
+                })
+            else:
+                return response.message.content
+
+
+def main():
+    global_resources = GlobalResources.initialize()
+    i = 1
+    state = SessionState(
+        messages=[
+            {
+                "role": "system",
+                "content": """
+                You are an assistant that uses tools to query databases, summarize data, and visualize data on behalf of the user.
+                Some tools that you interact with are large language models with access to the relevant context.
+                When using these tools, you create a prompt that contains all information relative to the model's task.
+                """
+            }
+        ]
+    )
+    state_actions = StateActions(state=state, resources=global_resources)
+    interpreter = Interpreter(actions=state_actions)
+    while prompt := input(f"In [{i}]: "):
+        state_actions.add_message({"role": "user", "content": prompt})
+        output = interpreter.run()
+        print(f"Out [{i}]:", output)
+
+
+if __name__ == '__main__':
+    main()

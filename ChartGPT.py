@@ -74,22 +74,22 @@ if prompt := st.chat_input("What questions do you have about your data?"):
 
     assistant_frame = AssistantFrame()
     st.session_state.frames.append(assistant_frame)
-    st.session_state.state_actions.add_message(prompt, role="user")
+    st.session_state.state_actions.add_message(dict(content=prompt, role="user"))
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
             with st.spinner("Writing query"):
-                assistant_frame.query = st.session_state.state_actions.generate_query()
+                assistant_frame.query = st.session_state.state_actions.generate_query("Prompt")
                 assistant_frame.render(placeholder)
             with st.spinner("Running query"):
-                assistant_frame.result_set = st.session_state.state_actions.run_query()
+                assistant_frame.result_set = st.session_state.state_actions.run_query("Query")
                 assistant_frame.render(placeholder)
             if len(assistant_frame.result_set) > 1:
                 with st.spinner("Summarizing data"):
-                    assistant_frame.summary = st.session_state.state_actions.summarize_data()
+                    assistant_frame.summary = st.session_state.state_actions.summarize_result_set()
                     assistant_frame.render(placeholder)
                 with st.spinner("Rendering chart"):
-                    assistant_frame.chart = st.session_state.state_actions.visualize_data()
+                    assistant_frame.chart = st.session_state.state_actions.visualize_result_set()
                     assistant_frame.render(placeholder)
         except (Exception,) as e:
             assistant_frame.error = str(e)

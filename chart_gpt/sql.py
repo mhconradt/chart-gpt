@@ -262,11 +262,10 @@ def get_select_x(sample: DataFrame, n_rows: int = 3) -> str:
         return "\n".join(parts)
 
 
-def chat_summarize_data(result_set: DataFrame, question: str, query: str) -> str:
+def chat_summarize_data(result_set: DataFrame, question: str) -> str:
     with pd.option_context(*LLM_PANDAS_DISPLAY_OPTIONS):
         return generate_completion(f"""
             User's question: {question}.
-            Generated SQL query: {query}
-            SQL query result set: {result_set}
+            Tabular data: {result_set}
             Summarize how this dataset answers the user's question:
         """, model='gpt-3.5-turbo')

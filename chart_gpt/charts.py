@@ -29,8 +29,7 @@ Examples:
 {examples}
 Generate a Vega Lite chart that answers the user's question from the data.
 User question: {question}
-Generated SQL query: {query}
-SQL query result (these will be automatically included in data.values):
+Tabular dataset (these will be automatically included in data.values):
 {result}
 Vega-Lite definition following schema at https://vega.github.io/schema/vega-lite/v5.json:
 """
@@ -99,15 +98,14 @@ class ChartIndex(ChartGptModel):
 class ChartGenerator(ChartGptModel):
     index: ChartIndex
 
-    def generate(self, question: str, query: str, result: DataFrame) -> dict:
+    def generate(self, question: str, result_set: DataFrame) -> dict:
         logger.info("Generating chart for question: %s", question)
-        data_values = result.to_dict(orient='records')
-        top_charts = self.index.top_charts(question, result)
+        data_values = result_set.to_dict(orient='records')
+        top_charts = self.index.top_charts(question, result_set)
         sample_data = data_values[:CHART_DEFAULT_CONTEXT_ROW_LIMIT]
         prompt = VEGA_LITE_CHART_PROMPT_FORMAT.format(
             result=json.dumps(sample_data, default=json_dumps_default),
             question=question,
-            query=query,
             examples=json.dumps(top_charts, default=json_dumps_default)
         )
         completion = generate_completion(prompt)
