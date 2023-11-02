@@ -56,6 +56,7 @@ salt = hash(json.dumps(st.session_state.secrets))
 
 class StreamlitStateActions(StateActions):
     def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
+        global assistant_frame, placeholder
         with st.spinner("Writing query"):
             generate_query_output = super().generate_query(command)
             assistant_frame.query = generate_query_output.query
@@ -63,6 +64,7 @@ class StreamlitStateActions(StateActions):
             return generate_query_output
 
     def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
+        global assistant_frame, placeholder
         with st.spinner("Running query"):
             run_query_output = super().run_query(command)
             result_set_id = run_query_output.result_set_id
@@ -71,6 +73,7 @@ class StreamlitStateActions(StateActions):
             return run_query_output
 
     def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
+        global assistant_frame, placeholder
         with st.spinner("Gathering insights"):
             summarize_result_set_output = super().summarize_result_set(command)
             assistant_frame.summary = summarize_result_set_output.summary
@@ -78,6 +81,7 @@ class StreamlitStateActions(StateActions):
             return summarize_result_set_output
 
     def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
+        global assistant_frame, placeholder
         with st.spinner("Crafting visualization"):
             visualize_result_set_output = super().visualize_result_set(command)
             assistant_frame.chart = visualize_result_set_output.vega_lite_specification
@@ -95,8 +99,8 @@ def get_state_actions(salt):
         try:
             secrets = {**st.secrets, **st.session_state.secrets}
             global_resources = GlobalResources.initialize(secrets=secrets)
-            actions = StateActions(resources=global_resources.model_dump(),
-                                   session_state=st.session_state.session_state)
+            actions = StreamlitStateActions(resources=global_resources.model_dump(),
+                                            session_state=st.session_state.session_state)
             st.success(f"Initialized schema {global_resources.connection.schema} in database {global_resources.connection.database}")
             return actions
         except (Exception,) as e:
@@ -126,8 +130,7 @@ if prompt := st.chat_input("What questions do you have about your data?"):
     with st.chat_message("assistant"):
         placeholder = st.empty()
         try:
-            assistant_frame.final = interpreter.run()
-            assistant_frame.render(placeholder)
+            interpreter.run()
         except (Exception,) as e:
             assistant_frame.error = str(e)
             assistant_frame.render(placeholder)
