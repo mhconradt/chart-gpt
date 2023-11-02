@@ -125,6 +125,7 @@ class StateActions(ChartGptModel):
     def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
         """
         Uses an LLM to write a SQL query to answer a question / follow command.
+        The query may be shown directly to the user by an external system.
         """
         try:
             query = self.resources.sql_generator.generate_valid_query(command.prompt)
@@ -136,6 +137,7 @@ class StateActions(ChartGptModel):
     def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
         """
         Runs a SQL query and stores the result set for question answering and visualization.
+        A preview of the data will be shown directly to the user by an external system.
         """
         try:
             cursor = self.resources.connection.cursor(cursor_class=DictCursor)
@@ -156,7 +158,8 @@ class StateActions(ChartGptModel):
 
     def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
         """
-        Uses an LLM to summarize information in the result set relevant to a prompt.
+        Uses an LLM to summarize information in the result set relevant to a prompt. The summary
+        will be shown directly to the user by an external system.
         """
         try:
             summary = chat_summarize_data(result_set=self.state.result_sets[command.result_set_id],
@@ -169,6 +172,7 @@ class StateActions(ChartGptModel):
     def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
         """
         Uses an LLM to create a Vega Lite specification to help answer the question / follow a command.
+        This visualization will be shown directly to the user by an external system.
         """
         try:
             chart = self.resources.chart_generator.generate(
