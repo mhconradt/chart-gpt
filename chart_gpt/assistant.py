@@ -168,20 +168,6 @@ class StateActions(ChartGptModel):
             raise UnsupportedAction()
 
 
-class StreamlitStateActions(StateActions):
-    def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
-        return super().generate_query(command)
-
-    def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
-        return super().run_query(command)
-
-    def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
-        return super().summarize_result_set(command)
-
-    def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
-        return super().visualize_result_set(command)
-
-
 class Interpreter(ChartGptModel):
     actions: StateActions
 

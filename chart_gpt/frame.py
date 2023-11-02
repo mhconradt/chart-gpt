@@ -20,6 +20,7 @@ class AssistantFrame(Frame):
     summary: Optional[str] = None
     chart: Optional[dict] = None
     error: Optional[str] = None
+    final: Optional[str] = None
 
     def render(self, canvas: DeltaGenerator):
         with canvas.container():
@@ -33,6 +34,8 @@ class AssistantFrame(Frame):
                 st.vega_lite_chart(self.result_set, self.chart)
             if self.error is not None:
                 st.error(self.error)
+            if self.final is not None:
+                st.markdown(self.final)
 
 
 class UserFrame(Frame):
