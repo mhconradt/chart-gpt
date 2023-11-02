@@ -1,10 +1,8 @@
-import functools
 import inspect
+import logging
 import os
 from typing import Any
-from typing import Literal
 from typing import Mapping
-from typing import Optional
 from uuid import uuid4
 
 import openai
@@ -24,23 +22,13 @@ from chart_gpt.sql import SQLGenerator
 
 EmptyListField = Field(default_factory=list)
 
+logger = logging.getLogger(__name__)
+
 
 class SessionState(ChartGptModel):
     # A materialized view of all chat messages
     messages: list[dict] = EmptyListField
-    queries: list[str] = EmptyListField
     result_sets: dict[str, DataFrame] = Field(default_factory=dict)
-    execution_errors: list[str] = EmptyListField
-    summaries: list[str] = EmptyListField
-    charts: list[dict] = EmptyListField
-
-    @property
-    def last_user_message(self) -> str:
-        for message in reversed(self.messages):
-            if message["role"] == "user":
-                return message["content"]
-        else:
-            raise LookupError("user")
 
 
 class GlobalResources(ChartGptModel):
@@ -129,7 +117,6 @@ class StateActions(ChartGptModel):
         """
         try:
             query = self.resources.sql_generator.generate_valid_query(command.prompt)
-            self.state.queries.append(query)
             return GenerateQueryOutput(query=query)
         except LookupError:
             raise UnsupportedAction()
@@ -152,8 +139,6 @@ class StateActions(ChartGptModel):
                                   columns=list(result_set.columns),
                                   row_count=len(result_set))
         except (Exception,) as e:
-            # Not sure about this.
-            self.state.execution_errors.append(e.args[0])
             raise e
 
     def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
@@ -164,7 +149,6 @@ class StateActions(ChartGptModel):
         try:
             summary = chat_summarize_data(result_set=self.state.result_sets[command.result_set_id],
                                           question=command.prompt)
-            self.state.summaries.append(summary)
             return SummarizeResultSetOutput(summary=summary)
         except KeyError:
             raise UnsupportedAction()
@@ -179,7 +163,6 @@ class StateActions(ChartGptModel):
                 question=command.prompt,
                 result_set=self.state.result_sets[command.result_set_id]
             )
-            self.state.charts.append(chart)
             return VisualizeResultSetOutput(vega_lite_specification=chart)
         except (LookupError, IndexError):
             raise UnsupportedAction()
