@@ -2,6 +2,7 @@
 
 Make a few tweaks to unfuck things after the refactor.
 
+Add buffering to messages context.
 
 2023-11-01
 

@@ -1,4 +1,5 @@
 import inspect
+import json
 import logging
 import os
 from typing import Any
@@ -8,6 +9,7 @@ from uuid import uuid4
 
 import openai
 import streamlit as st
+import tiktoken
 from pandas import DataFrame
 from pydantic import Field
 from snowflake.connector import DictCursor
@@ -32,7 +34,15 @@ logger = logging.getLogger(__name__)
 class SessionState(ChartGptModel):
     # A materialized view of all chat messages
     messages: list[dict] = EmptyListField
+    token_counts: list[int] = EmptyListField
     result_sets: dict[str, DataFrame] = Field(default_factory=dict)
+
+    def get_context_messages(self, n_tokens: int) -> list:
+        cum_count = 0
+        for i, message_count in enumerate(reversed(self.token_counts)):
+            if cum_count + message_count > n_tokens:
+                return self.messages[-i:]
+        return self.messages
 
 
 class GlobalResources(ChartGptModel):
@@ -115,6 +125,8 @@ class StateActions(ChartGptModel):
 
     def add_message(self, message: dict):
         self.state.messages.append(message)
+        encoding = tiktoken.get_encoding('cl100k_base')
+        self.state.token_counts.append(len(encoding.encode(json.dumps(message))))
 
     def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
         """
@@ -191,15 +203,16 @@ class Interpreter(ChartGptModel):
         }
         openai_functions = [get_openai_function(f) for f in functions]
         while True:
-            logger.debug("Calling openai.ChatCompletion.create: %s", self.actions.state.messages)
+            messages = self.actions.state.get_context_messages(8192 - 512)
+            logger.debug("Calling openai.ChatCompletion.create: %s", messages)
             response = openai.ChatCompletion.create(
                 model='gpt-4',
-                messages=self.actions.state.messages,
+                messages=messages,
                 functions=openai_functions,
                 temperature=0.0,
             ).choices[0]
             logger.info("OpenAI response: %s", response)
-            self.actions.add_message(response.message)
+            self.actions.add_message(response.message.to_dict_recursive())
             if response.finish_reason == "function_call":
                 function_call = response.message.function_call
                 fn = function_lut[function_call.name]
