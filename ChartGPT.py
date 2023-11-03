@@ -5,24 +5,16 @@ from datetime import timedelta
 
 import streamlit as st
 
-from chart_gpt.assistant import GenerateQueryCommand
-from chart_gpt.assistant import GenerateQueryOutput
-
 from chart_gpt.assistant import GlobalResources
 from chart_gpt.assistant import Interpreter
-from chart_gpt.assistant import RunQueryCommand
-from chart_gpt.assistant import RunQueryOutput
 from chart_gpt.assistant import SessionState
-from chart_gpt.assistant import StateActions
-from chart_gpt.assistant import SummarizeResultSetCommand
-from chart_gpt.assistant import SummarizeResultSetOutput
-from chart_gpt.assistant import VisualizeResultSet
-from chart_gpt.assistant import VisualizeResultSetOutput
+from chart_gpt.assistant import StreamlitStateActions
 from chart_gpt.frame import AssistantFrame
 from chart_gpt.frame import UserFrame
 
 log_level = st.secrets.get("LOG_LEVEL", "DEBUG")
 
+logging.getLogger("chart_gpt.assistant").setLevel(log_level)
 logging.getLogger("chart_gpt.sql").setLevel(log_level)
 logging.getLogger("chart_gpt.charts").setLevel(log_level)
 logging.getLogger("chart_gpt.utils").setLevel(log_level)
@@ -53,44 +45,19 @@ if 'secrets' not in st.session_state:
 
 salt = hash(json.dumps(st.session_state.secrets))
 
-
-class StreamlitStateActions(StateActions):
-    def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
-        global assistant_frame, placeholder
-        with st.spinner("Writing query"):
-            generate_query_output = super().generate_query(command)
-            assistant_frame.query = generate_query_output.query
-            assistant_frame.render(placeholder)
-            return generate_query_output
-
-    def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
-        global assistant_frame, placeholder
-        with st.spinner("Running query"):
-            run_query_output = super().run_query(command)
-            result_set_id = run_query_output.result_set_id
-            assistant_frame.result_set = self.state.result_sets[result_set_id]
-            assistant_frame.render(placeholder)
-            return run_query_output
-
-    def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
-        global assistant_frame, placeholder
-        with st.spinner("Gathering insights"):
-            summarize_result_set_output = super().summarize_result_set(command)
-            assistant_frame.summary = summarize_result_set_output.summary
-            assistant_frame.render(placeholder)
-            return summarize_result_set_output
-
-    def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
-        global assistant_frame, placeholder
-        with st.spinner("Crafting visualization"):
-            visualize_result_set_output = super().visualize_result_set(command)
-            assistant_frame.chart = visualize_result_set_output.vega_lite_specification
-            assistant_frame.render(placeholder)
-            return visualize_result_set_output
-
-
 if 'session_state' not in st.session_state:
-    st.session_state.session_state = SessionState()
+    st.session_state.session_state = SessionState(
+        messages=[
+            {
+                "role": "system",
+                "content": """
+                You are an assistant that uses tools to query databases, summarize data, and visualize data on behalf of the user.
+                Some tools that you interact with are large language models with access to the relevant context.
+                When using these tools, you create a prompt that contains all information relative to the model's task.
+                """
+            }
+        ]
+    )
 
 
 @st.cache_resource(ttl=timedelta(hours=4), show_spinner=False)
@@ -109,6 +76,15 @@ def get_state_actions(salt):
 
 st.session_state.state_actions = get_state_actions(salt)
 
+
+@st.cache_resource
+def get_interpreter(salt):
+    interpreter = Interpreter(actions=st.session_state.state_actions)
+    return interpreter
+
+
+interpreter = get_interpreter(salt)
+
 if 'frames' not in st.session_state:
     st.session_state.frames = []
 
@@ -124,11 +100,13 @@ if prompt := st.chat_input("What questions do you have about your data?"):
     user_frame.render(user_message)
 
     assistant_frame = AssistantFrame()
+    st.session_state.state_actions.assistant_frame = assistant_frame
+
     st.session_state.frames.append(assistant_frame)
     st.session_state.state_actions.add_message(dict(content=prompt, role="user"))
-    interpreter = Interpreter(actions=st.session_state.state_actions)
     with st.chat_message("assistant"):
         placeholder = st.empty()
+        st.session_state.state_actions.canvas = placeholder
         try:
             interpreter.run()
         except (Exception,) as e:

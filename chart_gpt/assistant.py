@@ -3,20 +3,24 @@ import logging
 import os
 from typing import Any
 from typing import Mapping
+from typing import Optional
 from uuid import uuid4
 
 import openai
+import streamlit as st
 from pandas import DataFrame
 from pydantic import Field
 from snowflake.connector import DictCursor
 from snowflake.connector import NotSupportedError
 from snowflake.connector import SnowflakeConnection
+from streamlit.delta_generator import DeltaGenerator
 
 from chart_gpt import ChartIndex
 from chart_gpt import DatabaseCrawler
 from chart_gpt import chat_summarize_data
 from chart_gpt import get_connection
 from chart_gpt.charts import ChartGenerator
+from chart_gpt.frame import AssistantFrame
 from chart_gpt.schemas import ChartGptModel
 from chart_gpt.sql import SQLGenerator
 
@@ -58,7 +62,8 @@ class UnsupportedAction(Exception):
 
 
 class GenerateQueryCommand(ChartGptModel):
-    prompt: str = Field(description="A question / command containing any user hints or preferences on how to write the query. The LLM will do the rest.")
+    prompt: str = Field(description="A question to be answered by a database query. "
+                                    "Also include any user preferences, i.e. tables or columns to use.")
 
 
 class GenerateQueryOutput(ChartGptModel):
@@ -78,6 +83,7 @@ class RunQueryOutput(ChartGptModel):
 class SummarizeResultSetCommand(ChartGptModel):
     prompt: str = Field(description="A question / command to answer / follow from the result set.")
     result_set_id: str = Field(description="A result set ID previously returned from run_query.")
+    query: str = Field(description="The SQL query used to produce the result set.")
 
 
 class SummarizeResultSetOutput(ChartGptModel):
@@ -112,9 +118,10 @@ class StateActions(ChartGptModel):
 
     def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
         """
-        Uses an LLM to write a SQL query to answer a question / follow command.
+        Uses an LLM to write a SQL query to answer a question.
         The query may be shown directly to the user by an external system.
         """
+        logger.info("Generating query: %s", command.model_dump())
         try:
             query = self.resources.sql_generator.generate_valid_query(command.prompt)
             return GenerateQueryOutput(query=query)
@@ -126,6 +133,7 @@ class StateActions(ChartGptModel):
         Runs a SQL query and stores the result set for question answering and visualization.
         A preview of the data will be shown directly to the user by an external system.
         """
+        logger.info("Running query: %s", command.model_dump())
         try:
             cursor = self.resources.connection.cursor(cursor_class=DictCursor)
             cursor.execute(command.query)
@@ -146,9 +154,11 @@ class StateActions(ChartGptModel):
         Uses an LLM to summarize information in the result set relevant to a prompt. The summary
         will be shown directly to the user by an external system.
         """
+        logger.info("Summarizing result set: %s", command.model_dump())
         try:
             summary = chat_summarize_data(result_set=self.state.result_sets[command.result_set_id],
-                                          question=command.prompt)
+                                          question=command.prompt,
+                                          query=command.query)
             return SummarizeResultSetOutput(summary=summary)
         except KeyError:
             raise UnsupportedAction()
@@ -158,6 +168,7 @@ class StateActions(ChartGptModel):
         Uses an LLM to create a Vega Lite specification to help answer the question / follow a command.
         This visualization will be shown directly to the user by an external system.
         """
+        logger.info("Visualizing result set: %s", command.model_dump())
         try:
             chart = self.resources.chart_generator.generate(
                 question=command.prompt,
@@ -180,12 +191,14 @@ class Interpreter(ChartGptModel):
         }
         openai_functions = [get_openai_function(f) for f in functions]
         while True:
+            logger.debug("Calling openai.ChatCompletion.create: %s", self.actions.state.messages)
             response = openai.ChatCompletion.create(
                 model='gpt-4',
                 messages=self.actions.state.messages,
                 functions=openai_functions,
                 temperature=0.0,
             ).choices[0]
+            logger.info("OpenAI response: %s", response)
             self.actions.add_message(response.message)
             if response.finish_reason == "function_call":
                 function_call = response.message.function_call
@@ -227,3 +240,37 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+class StreamlitStateActions(StateActions):
+    assistant_frame: Optional[AssistantFrame] = None
+    canvas: Optional[DeltaGenerator] = None
+
+    def generate_query(self, command: GenerateQueryCommand) -> GenerateQueryOutput:
+        with st.spinner("Writing query"):
+            generate_query_output = super().generate_query(command)
+            self.assistant_frame.query = generate_query_output.query
+            self.assistant_frame.render(self.canvas)
+            return generate_query_output
+
+    def run_query(self, command: RunQueryCommand) -> RunQueryOutput:
+        with st.spinner("Running query"):
+            run_query_output = super().run_query(command)
+            result_set_id = run_query_output.result_set_id
+            self.assistant_frame.result_set = self.state.result_sets[result_set_id]
+            self.assistant_frame.render(self.canvas)
+            return run_query_output
+
+    def summarize_result_set(self, command: SummarizeResultSetCommand) -> SummarizeResultSetOutput:
+        with st.spinner("Gathering insights"):
+            summarize_result_set_output = super().summarize_result_set(command)
+            self.assistant_frame.summary = summarize_result_set_output.summary
+            self.assistant_frame.render(self.canvas)
+            return summarize_result_set_output
+
+    def visualize_result_set(self, command: VisualizeResultSet) -> VisualizeResultSetOutput:
+        with st.spinner("Crafting visualization"):
+            visualize_result_set_output = super().visualize_result_set(command)
+            self.assistant_frame.chart = visualize_result_set_output.vega_lite_specification
+            self.assistant_frame.render(self.canvas)
+            return visualize_result_set_output
