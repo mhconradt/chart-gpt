@@ -9,6 +9,7 @@ from typing import Mapping
 
 import numpy as np
 import openai
+import tiktoken
 from pandas import DataFrame
 from pandas import Series
 from snowflake.connector import SnowflakeConnection
@@ -61,3 +62,7 @@ def pd_vss_lookup(index: DataFrame, query: np.array, n: int) -> Series:  # ?
     table_scores = similarity.sort_values(ascending=False) \
         .head(n)
     return table_scores
+
+
+def get_token_count(text: str, model: str = 'gpt-4') -> int:
+    return len(tiktoken.encoding_for_model(model).encode(text))

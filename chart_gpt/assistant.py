@@ -108,6 +108,15 @@ class VisualizeResultSet(ChartGptModel):
 class VisualizeResultSetOutput(ChartGptModel):
     vega_lite_specification: dict = Field(description="A Vega Lite specification.")
 
+    def llm_content(self) -> str:
+        # Limit the number of data values in the output
+        try:
+            data_values = self.vega_lite_specification['data']['values'][:3]
+            specification = {**self.vega_lite_specification, 'data': {'values': data_values}}
+            return VisualizeResultSetOutput(vega_lite_specification=specification).model_dump_json()
+        except KeyError:
+            return self.model_dump_json()
+
 
 def get_openai_function(f):
     command_type = inspect.get_annotations(f)['command']
@@ -205,12 +214,13 @@ class Interpreter(ChartGptModel):
         while True:
             messages = self.actions.state.get_context_messages(8192 - 512)
             logger.debug("Calling openai.ChatCompletion.create: %s", messages)
-            response = openai.ChatCompletion.create(
-                model='gpt-4',
-                messages=messages,
-                functions=openai_functions,
-                temperature=0.0,
-            ).choices[0]
+            with st.spinner(""):
+                response = openai.ChatCompletion.create(
+                    model='gpt-4',
+                    messages=messages,
+                    functions=openai_functions,
+                    temperature=0.0,
+                ).choices[0]
             logger.info("OpenAI response: %s", response)
             self.actions.add_message(response.message.to_dict_recursive())
             if response.finish_reason == "function_call":
@@ -222,37 +232,10 @@ class Interpreter(ChartGptModel):
                 self.actions.add_message({
                     "role": "function",
                     "name": function_call.name,
-                    "content": out.json()
+                    "content": out.llm_content()
                 })
             else:
                 return response.message.content
-
-
-def main():
-    global_resources = GlobalResources.initialize()
-    i = 1
-    state = SessionState(
-        messages=[
-            {
-                "role": "system",
-                "content": """
-                You are an assistant that uses tools to query databases, summarize data, and visualize data on behalf of the user.
-                Some tools that you interact with are large language models with access to the relevant context.
-                When using these tools, you create a prompt that contains all information relative to the model's task.
-                """
-            }
-        ]
-    )
-    state_actions = StateActions(state=state, resources=global_resources)
-    interpreter = Interpreter(actions=state_actions)
-    while prompt := input(f"In [{i}]: "):
-        state_actions.add_message({"role": "user", "content": prompt})
-        output = interpreter.run()
-        print(f"Out [{i}]:", output)
-
-
-if __name__ == '__main__':
-    main()
 
 
 class StreamlitStateActions(StateActions):

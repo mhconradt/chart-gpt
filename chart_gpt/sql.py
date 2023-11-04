@@ -12,6 +12,9 @@ from chart_gpt.schemas import ChartGptModel
 from chart_gpt.utils import extract_json
 from chart_gpt.utils import generate_completion
 
+# TODO: What should this be?
+#  An interesting argument is the number of query tokens is proportional to the number of context
+#  tokens, so the correct number is something like 8192 / 1.2.
 SQL_TOKEN_LIMIT = 4096
 
 logger = logging.getLogger(__name__)
