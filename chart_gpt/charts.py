@@ -108,7 +108,7 @@ class ChartGenerator(ChartGptModel):
             question=question,
             examples=json.dumps(top_charts, default=json_dumps_default)
         )
-        completion = generate_completion(prompt)
+        completion = generate_completion(prompt, temperature=0.)
         specification = extract_json(completion)
         specification['data'] = {'values': data_values}
         logger.info("Generated chart %s", specification)

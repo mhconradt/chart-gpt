@@ -29,13 +29,14 @@ def get_connection(secrets: Mapping[str, Any] = os.environ) -> SnowflakeConnecti
     )
 
 
-def generate_completion(prompt: str, model: str = 'gpt-4') -> str:
+def generate_completion(prompt: str, model: str = 'gpt-4', temperature: float = 1.) -> str:
     logger.debug("Getting %s completion for prompt %s", model, prompt)
     response = openai.ChatCompletion.create(
         model=model,
         messages=[
             {"role": "system", "content": prompt}
-        ]
+        ],
+        temperature=temperature
     ).choices[0].message.content
     logger.debug("Completion %s", response)
     return response

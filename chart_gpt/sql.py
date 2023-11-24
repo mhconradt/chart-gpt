@@ -201,7 +201,7 @@ class SQLGenerator(ChartGptModel):
                 return statement
 
     def generate(self, prompt):
-        answer = generate_completion(prompt, model=SQL_GENERATION_MODEL)
+        answer = generate_completion(prompt, model=SQL_GENERATION_MODEL, temperature=0.)
         statement = postprocess_generated_sql(answer)
         return statement
 
